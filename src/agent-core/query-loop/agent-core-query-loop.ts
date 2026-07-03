@@ -5,7 +5,10 @@ import {
 import { createAgentCoreMiddlewareChain } from "../middleware/agent-core-middleware-chain";
 import { readAgentCoreModelTurn } from "./agent-core-model-turn";
 import { settlePreExecutedToolCalls } from "./agent-core-pre-executed-tool-call";
-import { appendMissingToolResults } from "./agent-core-tool-result-pairing";
+import {
+  appendMissingToolResults,
+  repairAgentCoreToolResultPairing,
+} from "./agent-core-tool-result-pairing";
 import { runToolCallsStep } from "./agent-core-tool-step";
 import {
   latestUserPrompt,
@@ -36,7 +39,13 @@ const DEFAULT_MAX_TURNS = 20;
 export async function* runAgentCoreQueryLoop(
   args: AgentCoreQueryLoopArgs,
 ): AsyncGenerator<AgentCoreQueryEvent, AgentCoreQueryLoopResult> {
-  const messages = [...args.messages];
+  let messages = [...args.messages];
+  const pairingRepair = repairAgentCoreToolResultPairing({
+    messages,
+    reason:
+      "Recovered interrupted agent state: tool call did not complete before this run resumed.",
+  });
+  messages = pairingRepair.messages;
   const middlewareChain = createAgentCoreMiddlewareChain(args.middlewares);
   let queryArgs = args;
   const maxTurns = args.maxTurns ?? DEFAULT_MAX_TURNS;
@@ -50,6 +59,14 @@ export async function* runAgentCoreQueryLoop(
     });
 
   try {
+    for (const repair of pairingRepair.repairedToolResults) {
+      yield {
+        type: "tool-result",
+        call: repair.call,
+        result: repair.result,
+      };
+    }
+
     const middlewareTools = await middlewareChain.collectTools({
       queryArgs,
       messages,
