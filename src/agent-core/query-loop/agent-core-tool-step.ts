@@ -159,9 +159,10 @@ async function* handleToolCompletion(args: {
   }
 
   if (execution.status === "permission-denied") {
-    const result = applyAgentCoreToolResultTurnBudget({
+    const result = await applyAgentCoreToolResultTurnBudget({
       budget: args.resultBudget,
       call,
+      storeToolResultBlob: queryArgs.storeToolResultBlob,
       result: {
         content: execution.decision.reason,
         isError: true,
@@ -229,9 +230,10 @@ async function* handleToolCompletion(args: {
     };
   }
 
-  const result = applyAgentCoreToolResultTurnBudget({
+  const result = await applyAgentCoreToolResultTurnBudget({
     budget: args.resultBudget,
     call,
+    storeToolResultBlob: queryArgs.storeToolResultBlob,
     result: toolExecutionResultContent(call, execution),
   });
   appendToolMessage(messages, call, result);

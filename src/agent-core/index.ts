@@ -20,6 +20,8 @@ export type {
   AgentCoreQueryEvent,
   AgentCoreQueryLoopArgs,
   AgentCoreQueryLoopResult,
+  AgentCoreToolResultBlobReference,
+  AgentCoreToolResultBlobStore,
 } from "./query-loop/agent-core-query-types";
 export { createAgentCoreMiddlewareChain } from "./middleware/agent-core-middleware-chain";
 export type {
@@ -56,6 +58,14 @@ export type {
   AgentCoreToolProgress,
   AgentCoreToolResult,
 } from "./tools/agent-core-tool-types";
+export {
+  readAgentCoreToolResultBlob,
+  writeAgentCoreToolResultBlob,
+} from "./tools/agent-core-tool-result-blob-store";
+export type {
+  AgentCoreToolResultBlob,
+  StoredAgentCoreToolResultBlob,
+} from "./tools/agent-core-tool-result-blob-store";
 
 export type {
   AgentCoreHookContext,

@@ -20,6 +20,7 @@ export type AgentCoreRunPermissionArgs = {
   tools: NonNullable<AgentCoreQueryLoopArgs["tools"]>;
   signal?: AbortSignal;
   requestWorkerPermission?: AgentCoreQueryLoopArgs["requestWorkerPermission"];
+  storeToolResultBlob?: AgentCoreQueryLoopArgs["storeToolResultBlob"];
   onPermissionRequest: NonNullable<AgentCoreRunControllerOptions["onPermissionRequest"]>;
   workers: readonly AgentCoreWorker[];
 };
@@ -41,6 +42,7 @@ export async function* resumeAgentCoreRunPermission(
     decision,
     signal: args.signal,
     requestWorkerPermission: args.requestWorkerPermission,
+    storeToolResultBlob: args.storeToolResultBlob,
   });
   while (true) {
     const item = await resumeGenerator.next();

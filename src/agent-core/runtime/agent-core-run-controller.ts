@@ -3,10 +3,12 @@ import { recordAgentCoreSystemContextSnapshot } from "../context/agent-core-syst
 import type {
   AgentCoreMessage,
   AgentCoreQueryEvent,
+  AgentCoreQueryLoopArgs,
   AgentCoreQueryLoopResult,
 } from "../query-loop/agent-core-query-types";
 import { runAgentCoreQueryLoop } from "../query-loop/agent-core-query-loop";
 import { appendAgentCoreInputHistoryEntry } from "../session/agent-core-input-history";
+import { writeAgentCoreToolResultBlob } from "../tools/agent-core-tool-result-blob-store";
 import { applyAgentCoreRunBudgetWithHookRecording } from "./agent-core-run-budget-hook-recording";
 import { resumeAgentCoreRunElicitation } from "./agent-core-run-elicitation";
 import { resumeAgentCoreRunPermission } from "./agent-core-run-permission";
@@ -171,6 +173,25 @@ export async function* runAgentCoreController(
       session,
       onRequest: options.onWorkerPermissionRequest,
     });
+    const storeToolResultBlob: AgentCoreQueryLoopArgs["storeToolResultBlob"] = async ({
+      call,
+      content,
+      originalChars,
+    }) => {
+      const blob = await writeAgentCoreToolResultBlob({
+        projectDir: session.handle.projectDir,
+        sessionId: session.handle.sessionId,
+        cwd: session.handle.cwd,
+        toolCallId: call.id,
+        toolName: call.name,
+        content,
+        originalChars,
+      });
+      return {
+        outputBlobPath: blob.relativePath,
+        outputBlobBytes: blob.byteLength,
+      };
+    };
     let reactiveCompactRetried = false;
     while (true) {
       const generator = runAgentCoreQueryLoop({
@@ -179,6 +200,7 @@ export async function* runAgentCoreController(
         messages,
         hooks,
         requestWorkerPermission,
+        storeToolResultBlob,
       });
       let result: AgentCoreQueryLoopResult;
       while (true) {
@@ -297,6 +319,7 @@ export async function* runAgentCoreController(
           tools: context.tools,
           signal: options.signal,
           requestWorkerPermission,
+          storeToolResultBlob,
           onPermissionRequest: options.onPermissionRequest,
           workers: options.workers ?? [],
         });

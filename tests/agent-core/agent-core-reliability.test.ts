@@ -11,6 +11,10 @@ import { readAgentCoreJsonlWindow } from "../../src/agent-core/session/agent-cor
 import { readLatestAgentCorePlanJournal } from "../../src/agent-core/tools/agent-core-plan-journal";
 import { runAgentCoreQueryLoop } from "../../src/agent-core/query-loop/agent-core-query-loop";
 import { AGENT_CORE_TOOL_RESULTS_PER_TURN_MAX_CHARS } from "../../src/agent-core/query-loop/agent-core-tool-result-turn-budget";
+import {
+  readAgentCoreToolResultBlob,
+  writeAgentCoreToolResultBlob,
+} from "../../src/agent-core/tools/agent-core-tool-result-blob-store";
 import { readLatestAgentCoreShellTaskJournal } from "../../src/agent-core/tools/shell-task-journal";
 import { readAgentCoreShellCwdState } from "../../src/agent-core/tools/shell-cwd-state";
 import { evaluateAgentCorePathPermission } from "../../src/agent-core/permissions/workspace-path-policy";
@@ -292,6 +296,11 @@ describe("agent core reliability guards", () => {
 
   it("caps aggregate tool result content within one assistant turn", async () => {
     let streamCount = 0;
+    const storedBlobs: Array<{
+      toolCallId: string;
+      content: string;
+      originalChars: number;
+    }> = [];
     const outputByName = new Map([
       ["first", "a".repeat(150_000)],
       ["second", "b".repeat(90_000)],
@@ -345,6 +354,17 @@ describe("agent core reliability guards", () => {
         },
       },
       maxTurns: 3,
+      storeToolResultBlob: async ({ call, content, originalChars }) => {
+        storedBlobs.push({
+          toolCallId: call.id,
+          content,
+          originalChars,
+        });
+        return {
+          outputBlobPath: `blob/${call.id}.json`,
+          outputBlobBytes: Buffer.byteLength(content, "utf8"),
+        };
+      },
     });
 
     const result = await (async () => {
@@ -365,9 +385,68 @@ describe("agent core reliability guards", () => {
     );
     expect(toolMessages[1]?.content).toContain("keptChars: 50000");
     expect(toolMessages[2]?.content).toContain("keptChars: 0");
+    expect(toolMessages[1]).toMatchObject({
+      outputTruncated: true,
+      outputOriginalChars: 90_000,
+      outputBlobPath: "blob/call_second.json",
+    });
+    expect(toolMessages[2]).toMatchObject({
+      outputTruncated: true,
+      outputOriginalChars: 1_000,
+      outputBlobPath: "blob/call_third.json",
+    });
+    expect(storedBlobs).toEqual([
+      {
+        toolCallId: "call_second",
+        content: "b".repeat(90_000),
+        originalChars: 90_000,
+      },
+      {
+        toolCallId: "call_third",
+        content: "c".repeat(1_000),
+        originalChars: 1_000,
+      },
+    ]);
     expect(toolMessages.reduce((sum, message) => sum + message.content.length, 0)).toBeLessThan(
       AGENT_CORE_TOOL_RESULTS_PER_TURN_MAX_CHARS + 1_000,
     );
+  });
+
+  it("stores full truncated tool result blobs under the session runtime path", async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), "mllo-tool-blob-"));
+    const content = "full output\n".repeat(1_000);
+    const stored = await writeAgentCoreToolResultBlob({
+      projectDir,
+      sessionId: "session/with unsafe chars",
+      cwd: "/tmp/project",
+      toolCallId: "call_read",
+      toolName: "read_file",
+      content,
+      originalChars: content.length + 10,
+    });
+
+    const blob = await readAgentCoreToolResultBlob({
+      projectDir,
+      relativePath: stored.relativePath,
+    });
+
+    expect(stored.relativePath).toContain("threads/session-with-unsafe-chars/tool-results/");
+    expect(stored.byteLength).toBeGreaterThan(content.length);
+    expect(blob).toMatchObject({
+      version: 1,
+      sessionId: "session/with unsafe chars",
+      cwd: "/tmp/project",
+      toolCallId: "call_read",
+      toolName: "read_file",
+      content,
+      originalChars: content.length + 10,
+    });
+    await expect(
+      readAgentCoreToolResultBlob({
+        projectDir,
+        relativePath: "../escape.json",
+      }),
+    ).rejects.toThrow("Tool result blob path escapes mllo project storage.");
   });
 
   it("does not pre-execute repaired streaming tool calls before the model turn closes", async () => {

@@ -1,4 +1,5 @@
 import type { AgentCoreToolCall, AgentCoreToolResult } from "../tools/agent-core-tool-types";
+import type { AgentCoreToolResultBlobStore } from "./agent-core-query-types";
 
 export const AGENT_CORE_TOOL_RESULTS_PER_TURN_MAX_CHARS = 200_000;
 
@@ -38,11 +39,12 @@ function aggregateBudgetNotice(args: {
 }
 
 // 同一 assistant turn 的工具结果共享预算，避免多个“不过单工具上限”的结果合起来打爆上下文。
-export function applyAgentCoreToolResultTurnBudget(args: {
+export async function applyAgentCoreToolResultTurnBudget(args: {
   budget: AgentCoreToolResultTurnBudget;
   call: AgentCoreToolCall;
   result: AgentCoreToolResult;
-}): AgentCoreToolResult {
+  storeToolResultBlob?: AgentCoreToolResultBlobStore;
+}): Promise<AgentCoreToolResult> {
   if (!Number.isFinite(args.budget.maxChars)) {
     args.budget.usedChars += args.result.content.length;
     return args.result;
@@ -63,6 +65,14 @@ export function applyAgentCoreToolResultTurnBudget(args: {
   });
   const content =
     keptChars === 0 ? notice : `${args.result.content.slice(0, keptChars)}\n\n${notice}`;
+  const blob =
+    args.storeToolResultBlob === undefined
+      ? undefined
+      : await args.storeToolResultBlob({
+          call: args.call,
+          content: args.result.content,
+          originalChars,
+        });
   args.budget.usedChars += content.length;
   args.budget.truncatedResults += 1;
   return {
@@ -71,5 +81,11 @@ export function applyAgentCoreToolResultTurnBudget(args: {
     outputTruncated: true,
     outputOriginalChars: originalChars,
     outputMaxChars: keptChars,
+    ...(blob === undefined
+      ? {}
+      : {
+          outputBlobPath: blob.outputBlobPath,
+          outputBlobBytes: blob.outputBlobBytes,
+        }),
   };
 }
