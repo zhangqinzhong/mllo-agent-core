@@ -130,11 +130,16 @@ export {
   appendAgentCoreInputHistoryEntry,
   listAgentCoreInputHistory,
   readAgentCoreInputHistory,
+  readAgentCoreInputHistoryRecords,
+  retractAgentCoreInputHistoryEntry,
 } from "./session/agent-core-input-history";
 export type {
   AgentCoreInputHistoryAppendArgs,
   AgentCoreInputHistoryEntry,
   AgentCoreInputHistoryListOptions,
+  AgentCoreInputHistoryRecord,
+  AgentCoreInputHistoryRetractArgs,
+  AgentCoreInputHistoryRetractionEntry,
 } from "./session/agent-core-input-history";
 
 export type {

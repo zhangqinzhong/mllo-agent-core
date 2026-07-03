@@ -15,6 +15,20 @@ export type AgentCoreInputHistoryEntry = {
   input: string;
 };
 
+export type AgentCoreInputHistoryRetractionEntry = {
+  kind: "input-retraction";
+  uuid: string;
+  timestamp: string;
+  sessionId: string;
+  cwd: string;
+  inputUuid: string;
+  reason: "interrupted" | "user-undo";
+};
+
+export type AgentCoreInputHistoryRecord =
+  | AgentCoreInputHistoryEntry
+  | AgentCoreInputHistoryRetractionEntry;
+
 export type AgentCoreInputHistoryListOptions = {
   configDir: string;
   cwd?: string;
@@ -30,11 +44,19 @@ export type AgentCoreInputHistoryAppendArgs = {
   input: string;
 };
 
+export type AgentCoreInputHistoryRetractArgs = {
+  configDir: string;
+  sessionId: string;
+  cwd: string;
+  inputUuid: string;
+  reason: "interrupted" | "user-undo";
+};
+
 function nowIso(): string {
   return new Date().toISOString();
 }
 
-function serializeHistoryEntry(entry: AgentCoreInputHistoryEntry): string {
+function serializeHistoryRecord(entry: AgentCoreInputHistoryRecord): string {
   return `${JSON.stringify(entry)}\n`;
 }
 
@@ -57,10 +79,33 @@ function isInputHistoryEntry(value: unknown): value is AgentCoreInputHistoryEntr
   );
 }
 
-function parseHistoryLine(line: string, lineNumber: number): AgentCoreInputHistoryEntry {
+function isInputHistoryRetractionEntry(
+  value: unknown,
+): value is AgentCoreInputHistoryRetractionEntry {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "kind" in value &&
+    value.kind === "input-retraction" &&
+    "uuid" in value &&
+    typeof value.uuid === "string" &&
+    "timestamp" in value &&
+    typeof value.timestamp === "string" &&
+    "sessionId" in value &&
+    typeof value.sessionId === "string" &&
+    "cwd" in value &&
+    typeof value.cwd === "string" &&
+    "inputUuid" in value &&
+    typeof value.inputUuid === "string" &&
+    "reason" in value &&
+    (value.reason === "interrupted" || value.reason === "user-undo")
+  );
+}
+
+function parseHistoryLine(line: string, lineNumber: number): AgentCoreInputHistoryRecord {
   try {
     const value = JSON.parse(line) as unknown;
-    if (!isInputHistoryEntry(value)) {
+    if (!isInputHistoryEntry(value) && !isInputHistoryRetractionEntry(value)) {
       throw new Error("entry is not an input history record");
     }
     return value;
@@ -86,8 +131,8 @@ function normalizeLimit(limit: number | undefined): number {
   return Number.isSafeInteger(limit) && limit > 0 ? limit : DEFAULT_INPUT_HISTORY_LIMIT;
 }
 
-function inputHistoryMatchesCwd(
-  entry: AgentCoreInputHistoryEntry,
+function historyRecordMatchesCwd(
+  entry: AgentCoreInputHistoryRecord,
   normalizedCwd: string | undefined,
 ): boolean {
   return normalizedCwd === undefined || resolve(entry.cwd) === normalizedCwd;
@@ -149,7 +194,30 @@ export async function appendAgentCoreInputHistoryEntry(
   await mkdir(dirname(historyPath), {
     recursive: true,
   });
-  await appendFile(historyPath, serializeHistoryEntry(entry), "utf8");
+  await appendFile(historyPath, serializeHistoryRecord(entry), "utf8");
+  return entry;
+}
+
+// 追加一条撤销记录。history 是 append-only 文件，撤销不能重写已有行。
+export async function retractAgentCoreInputHistoryEntry(
+  args: AgentCoreInputHistoryRetractArgs,
+): Promise<AgentCoreInputHistoryRetractionEntry> {
+  const entry: AgentCoreInputHistoryRetractionEntry = {
+    kind: "input-retraction",
+    uuid: randomUUID(),
+    timestamp: nowIso(),
+    sessionId: args.sessionId,
+    cwd: args.cwd,
+    inputUuid: args.inputUuid,
+    reason: args.reason,
+  };
+  const historyPath = getMlloHistoryPath({
+    homePath: args.configDir,
+  });
+  await mkdir(dirname(historyPath), {
+    recursive: true,
+  });
+  await appendFile(historyPath, serializeHistoryRecord(entry), "utf8");
   return entry;
 }
 
@@ -165,15 +233,23 @@ export async function listAgentCoreInputHistory(
   const currentSessionEntries: AgentCoreInputHistoryEntry[] = [];
   const otherSessionEntries: AgentCoreInputHistoryEntry[] = [];
   const seenInputs = new Set<string>();
+  const retractedInputUuids = new Set<string>();
   try {
     for await (const line of readHistoryLinesReverse(historyPath)) {
-      let entry: AgentCoreInputHistoryEntry;
+      let entry: AgentCoreInputHistoryRecord;
       try {
         entry = parseHistoryLine(line, 0);
       } catch {
         continue;
       }
-      if (!inputHistoryMatchesCwd(entry, normalizedCwd)) {
+      if (!historyRecordMatchesCwd(entry, normalizedCwd)) {
+        continue;
+      }
+      if (entry.kind === "input-retraction") {
+        retractedInputUuids.add(entry.inputUuid);
+        continue;
+      }
+      if (retractedInputUuids.has(entry.uuid)) {
         continue;
       }
       if (options.dedupeByInput === true) {
@@ -200,10 +276,10 @@ export async function listAgentCoreInputHistory(
   return [...currentSessionEntries, ...otherSessionEntries].slice(0, limit);
 }
 
-// 读取输入历史。坏行直接报错，避免 UI 基于损坏 history 展示误导性记录。
-export async function readAgentCoreInputHistory(
+// 读取原始 history record。审计场景需要能看到 retraction tombstone。
+export async function readAgentCoreInputHistoryRecords(
   configDir: string,
-): Promise<AgentCoreInputHistoryEntry[]> {
+): Promise<AgentCoreInputHistoryRecord[]> {
   const historyPath = getMlloHistoryPath({
     homePath: configDir,
   });
@@ -221,4 +297,12 @@ export async function readAgentCoreInputHistory(
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
     .map((line, index) => parseHistoryLine(line, index + 1));
+}
+
+// 读取输入历史。坏行直接报错，避免 UI 基于损坏 history 展示误导性记录。
+export async function readAgentCoreInputHistory(
+  configDir: string,
+): Promise<AgentCoreInputHistoryEntry[]> {
+  const records = await readAgentCoreInputHistoryRecords(configDir);
+  return records.filter(isInputHistoryEntry);
 }

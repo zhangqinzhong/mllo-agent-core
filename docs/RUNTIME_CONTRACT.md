@@ -62,6 +62,7 @@ JSONL transcript 是会话事实来源。
 - 追加写入必须带 `sessionId`、`cwd` 和原始 `input`。
 - CLI/GUI 用于展示历史时必须反向读取、按 `cwd` 过滤，并支持当前 session 优先。
 - 交互历史 listing 必须跳过坏行；严格审计 reader 可以继续报错。
+- 语义撤销必须追加 `input-retraction` tombstone。比如中断恢复或用户 undo 让某次提交不再代表真实意图时，交互 listing 必须隐藏被撤销输入，审计 reader 必须保留原始记录和撤销记录。
 - 大历史文件不能要求宿主应用整文件读入内存。
 
 ### 3. Runtime State

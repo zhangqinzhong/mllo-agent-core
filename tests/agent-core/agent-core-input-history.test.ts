@@ -3,9 +3,13 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  appendAgentCoreInputHistoryEntry,
   listAgentCoreInputHistory,
   readAgentCoreInputHistory,
+  readAgentCoreInputHistoryRecords,
+  retractAgentCoreInputHistoryEntry,
   type AgentCoreInputHistoryEntry,
+  type AgentCoreInputHistoryRecord,
 } from "../../src/agent-core/session/agent-core-input-history";
 import { getMlloHistoryPath } from "../../src/agent-core/runtime-home/mllo-home-paths";
 
@@ -28,7 +32,7 @@ function inputEntry(args: {
 
 async function writeHistory(
   configDir: string,
-  lines: readonly (AgentCoreInputHistoryEntry | string)[],
+  lines: readonly (AgentCoreInputHistoryRecord | string)[],
 ): Promise<void> {
   const historyPath = getMlloHistoryPath({
     homePath: configDir,
@@ -154,5 +158,64 @@ describe("agent core input history", () => {
         configDir,
       }),
     ).resolves.toEqual([]);
+  });
+
+  it("hides retracted inputs from interactive history while preserving audit records", async () => {
+    const configDir = await mkdtemp(join(tmpdir(), "mllo-input-history-retract-"));
+    const cwd = join(configDir, "project");
+    const first = await appendAgentCoreInputHistoryEntry({
+      configDir,
+      sessionId: "s1",
+      cwd,
+      input: "prompt to retract",
+    });
+    const second = await appendAgentCoreInputHistoryEntry({
+      configDir,
+      sessionId: "s1",
+      cwd,
+      input: "prompt to keep",
+    });
+    await retractAgentCoreInputHistoryEntry({
+      configDir,
+      sessionId: "s1",
+      cwd,
+      inputUuid: first.uuid,
+      reason: "user-undo",
+    });
+
+    await expect(
+      listAgentCoreInputHistory({
+        configDir,
+        cwd,
+        sessionId: "s1",
+      }),
+    ).resolves.toMatchObject([
+      {
+        uuid: second.uuid,
+        input: "prompt to keep",
+      },
+    ]);
+    await expect(readAgentCoreInputHistory(configDir)).resolves.toMatchObject([
+      {
+        uuid: first.uuid,
+      },
+      {
+        uuid: second.uuid,
+      },
+    ]);
+    await expect(readAgentCoreInputHistoryRecords(configDir)).resolves.toMatchObject([
+      {
+        kind: "input",
+        uuid: first.uuid,
+      },
+      {
+        kind: "input",
+        uuid: second.uuid,
+      },
+      {
+        kind: "input-retraction",
+        inputUuid: first.uuid,
+      },
+    ]);
   });
 });
