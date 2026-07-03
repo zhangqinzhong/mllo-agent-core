@@ -102,7 +102,38 @@ function findAssistantToolCallIndex(
   return undefined;
 }
 
-// compact tail 不能从 tool_result 中间开始，否则保留下来的上下文会失去对应 tool_call。
+function findAssistantToolCallIndexForFollowingAssistant(
+  messages: readonly AgentCoreMessage[],
+  assistantIndex: number,
+): number | undefined {
+  if (messages[assistantIndex]?.role !== "assistant") {
+    return undefined;
+  }
+  for (let index = assistantIndex - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== "tool") {
+      break;
+    }
+    const toolCallIndex = findAssistantToolCallIndex(messages, index);
+    if (toolCallIndex !== undefined) {
+      return toolCallIndex;
+    }
+  }
+  return undefined;
+}
+
+function findToolTrajectoryStartIndex(
+  messages: readonly AgentCoreMessage[],
+  index: number,
+): number | undefined {
+  const message = messages[index];
+  if (message?.role === "tool") {
+    return findAssistantToolCallIndex(messages, index);
+  }
+  return findAssistantToolCallIndexForFollowingAssistant(messages, index);
+}
+
+// compact tail 不能切断 tool_call -> tool_result -> assistant 回复这条工具轨迹。
 function expandTailStartToToolTrajectory(
   messages: readonly AgentCoreMessage[],
   initialStartIndex: number,
@@ -112,9 +143,9 @@ function expandTailStartToToolTrajectory(
   while (changed) {
     changed = false;
     for (let index = startIndex; index < messages.length; index += 1) {
-      const assistantIndex = findAssistantToolCallIndex(messages, index);
-      if (assistantIndex !== undefined && assistantIndex < startIndex) {
-        startIndex = assistantIndex;
+      const trajectoryStartIndex = findToolTrajectoryStartIndex(messages, index);
+      if (trajectoryStartIndex !== undefined && trajectoryStartIndex < startIndex) {
+        startIndex = trajectoryStartIndex;
         changed = true;
         break;
       }
