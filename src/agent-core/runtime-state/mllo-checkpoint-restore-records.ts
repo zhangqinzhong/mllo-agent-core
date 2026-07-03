@@ -1,70 +1,70 @@
-import type Database from '../../sqlite/sync-database'
+import type { SyncDatabaseHandle } from "../../sqlite/sync-database";
 
-export type MlloCheckpointRestoreAction = 'restored' | 'deleted' | 'conflict'
-export type MlloCheckpointRestoreConflictStrategy = 'skip' | 'force'
+export type MlloCheckpointRestoreAction = "restored" | "deleted" | "conflict";
+export type MlloCheckpointRestoreConflictStrategy = "skip" | "force";
 
 export type MlloCheckpointRestoreFileRecord = {
-  restoreId: string
-  path: string
-  resolvedPath: string
-  action: MlloCheckpointRestoreAction
-  reason?: string
-  restoredAt?: string
-}
+  restoreId: string;
+  path: string;
+  resolvedPath: string;
+  action: MlloCheckpointRestoreAction;
+  reason?: string;
+  restoredAt?: string;
+};
 
 export type MlloCheckpointRestoreRecord = {
-  id: string
-  threadId: string
-  checkpointId: string
-  checkpointPath: string
-  conflictStrategy: MlloCheckpointRestoreConflictStrategy
-  requestedFilePaths: string[]
-  restoredCount: number
-  deletedCount: number
-  conflictCount: number
-  createdAtMs: number
-}
+  id: string;
+  threadId: string;
+  checkpointId: string;
+  checkpointPath: string;
+  conflictStrategy: MlloCheckpointRestoreConflictStrategy;
+  requestedFilePaths: string[];
+  restoredCount: number;
+  deletedCount: number;
+  conflictCount: number;
+  createdAtMs: number;
+};
 
 export type MlloCheckpointRestoreRow = {
-  id: string
-  thread_id: string
-  checkpoint_id: string
-  checkpoint_path: string
-  conflict_strategy: MlloCheckpointRestoreConflictStrategy
-  requested_file_paths_json: string
-  restored_count: number
-  deleted_count: number
-  conflict_count: number
-  created_at_ms: number
-}
+  id: string;
+  thread_id: string;
+  checkpoint_id: string;
+  checkpoint_path: string;
+  conflict_strategy: MlloCheckpointRestoreConflictStrategy;
+  requested_file_paths_json: string;
+  restored_count: number;
+  deleted_count: number;
+  conflict_count: number;
+  created_at_ms: number;
+};
 
 export type MlloCheckpointRestoreFileRow = {
-  restore_id: string
-  path: string
-  resolved_path: string
-  action: MlloCheckpointRestoreAction
-  reason: string | null
-  restored_at: string | null
-}
+  restore_id: string;
+  path: string;
+  resolved_path: string;
+  action: MlloCheckpointRestoreAction;
+  reason: string | null;
+  restored_at: string | null;
+};
 
 function parseRequestedFilePaths(value: string): string[] {
-  let parsed: unknown
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(value) as unknown
+    parsed = JSON.parse(value) as unknown;
   } catch {
-    return []
+    return [];
   }
   return Array.isArray(parsed)
-    ? parsed.filter((item): item is string => typeof item === 'string')
-    : []
+    ? parsed.filter((item): item is string => typeof item === "string")
+    : [];
 }
 
 export function stringifyMlloRequestedFilePaths(values: readonly string[] = []): string {
-  return JSON.stringify([...values])
+  return JSON.stringify([...values]);
 }
 
 export function toMlloCheckpointRestoreRecord(
-  row: MlloCheckpointRestoreRow
+  row: MlloCheckpointRestoreRow,
 ): MlloCheckpointRestoreRecord {
   return {
     id: row.id,
@@ -76,32 +76,32 @@ export function toMlloCheckpointRestoreRecord(
     restoredCount: row.restored_count,
     deletedCount: row.deleted_count,
     conflictCount: row.conflict_count,
-    createdAtMs: row.created_at_ms
-  }
+    createdAtMs: row.created_at_ms,
+  };
 }
 
 export function toMlloCheckpointRestoreFileRecord(
-  row: MlloCheckpointRestoreFileRow
+  row: MlloCheckpointRestoreFileRow,
 ): MlloCheckpointRestoreFileRecord {
   const record: MlloCheckpointRestoreFileRecord = {
     restoreId: row.restore_id,
     path: row.path,
     resolvedPath: row.resolved_path,
-    action: row.action
-  }
+    action: row.action,
+  };
   if (row.reason !== null) {
-    record.reason = row.reason
+    record.reason = row.reason;
   }
   if (row.restored_at !== null) {
-    record.restoredAt = row.restored_at
+    record.restoredAt = row.restored_at;
   }
-  return record
+  return record;
 }
 
 export function upsertMlloCheckpointRestore(
-  db: Database.Database,
+  db: SyncDatabaseHandle,
   record: MlloCheckpointRestoreRecord,
-  files: readonly MlloCheckpointRestoreFileRecord[]
+  files: readonly MlloCheckpointRestoreFileRecord[],
 ): void {
   db.prepare(
     `
@@ -120,7 +120,7 @@ export function upsertMlloCheckpointRestore(
         deleted_count = excluded.deleted_count,
         conflict_count = excluded.conflict_count,
         created_at_ms = excluded.created_at_ms
-    `
+    `,
   ).run(
     record.id,
     record.threadId,
@@ -131,17 +131,17 @@ export function upsertMlloCheckpointRestore(
     record.restoredCount,
     record.deletedCount,
     record.conflictCount,
-    record.createdAtMs
-  )
-  db.prepare('DELETE FROM checkpoint_restore_files WHERE restore_id = ?').run(record.id)
+    record.createdAtMs,
+  );
+  db.prepare("DELETE FROM checkpoint_restore_files WHERE restore_id = ?").run(record.id);
   const insertFile = db.prepare(
     `
       INSERT INTO checkpoint_restore_files (
         restore_id, path, resolved_path, action, reason, restored_at
       )
       VALUES (?, ?, ?, ?, ?, ?)
-    `
-  )
+    `,
+  );
   for (const file of files) {
     insertFile.run(
       file.restoreId,
@@ -149,29 +149,29 @@ export function upsertMlloCheckpointRestore(
       file.resolvedPath,
       file.action,
       file.reason ?? null,
-      file.restoredAt ?? null
-    )
+      file.restoredAt ?? null,
+    );
   }
 }
 
 export function listMlloCheckpointRestoresForThread(
-  db: Database.Database,
-  threadId: string
+  db: SyncDatabaseHandle,
+  threadId: string,
 ): MlloCheckpointRestoreRecord[] {
   return (
     db
-      .prepare('SELECT * FROM checkpoint_restores WHERE thread_id = ? ORDER BY created_at_ms ASC')
+      .prepare("SELECT * FROM checkpoint_restores WHERE thread_id = ? ORDER BY created_at_ms ASC")
       .all(threadId) as MlloCheckpointRestoreRow[]
-  ).map(toMlloCheckpointRestoreRecord)
+  ).map(toMlloCheckpointRestoreRecord);
 }
 
 export function listMlloCheckpointRestoreFiles(
-  db: Database.Database,
-  restoreId: string
+  db: SyncDatabaseHandle,
+  restoreId: string,
 ): MlloCheckpointRestoreFileRecord[] {
   return (
     db
-      .prepare('SELECT * FROM checkpoint_restore_files WHERE restore_id = ? ORDER BY path ASC')
+      .prepare("SELECT * FROM checkpoint_restore_files WHERE restore_id = ? ORDER BY path ASC")
       .all(restoreId) as MlloCheckpointRestoreFileRow[]
-  ).map(toMlloCheckpointRestoreFileRecord)
+  ).map(toMlloCheckpointRestoreFileRecord);
 }

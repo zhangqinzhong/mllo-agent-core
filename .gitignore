@@ -2,12 +2,14 @@ node_modules/
 dist/
 coverage/
 *.tsbuildinfo
+.idea/
 
 *.sqlite
 *.sqlite-*
 *.db
 *.jsonl
 dump-prompts/
+notes/
 
 .DS_Store
 .env

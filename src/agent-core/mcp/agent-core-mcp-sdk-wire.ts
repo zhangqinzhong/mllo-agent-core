@@ -1,33 +1,33 @@
-import type { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js'
+import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type {
   AgentCoreMcpToolCallResult,
-  AgentCoreMcpToolDescriptor
-} from './agent-core-mcp-client-types'
+  AgentCoreMcpToolDescriptor,
+} from "./agent-core-mcp-client-types";
 
-type AgentCoreMcpSdkCallToolResult = CallToolResult | { toolResult: unknown }
+type AgentCoreMcpSdkCallToolResult = CallToolResult | { toolResult: unknown };
 
-// 中文注释：MCP SDK wire shape 不稳定时，core 只保留自己的最小 tool 描述。
+// MCP SDK wire shape 不稳定时，core 只保留自己的最小 tool 描述。
 export function toAgentCoreMcpToolDescriptor(tool: Tool): AgentCoreMcpToolDescriptor {
   const descriptor: AgentCoreMcpToolDescriptor = {
-    name: tool.name
-  }
+    name: tool.name,
+  };
   if (tool.description !== undefined) {
-    descriptor.description = tool.description
+    descriptor.description = tool.description;
   }
   if (tool.inputSchema !== undefined) {
-    descriptor.inputSchema = tool.inputSchema
+    descriptor.inputSchema = tool.inputSchema;
   }
-  return descriptor
+  return descriptor;
 }
 
-// 中文注释：不同 MCP SDK 版本可能返回 toolResult 或 content，这里统一成 core result。
+// 不同 MCP SDK 版本可能返回 toolResult 或 content，这里统一成 core result。
 export function toAgentCoreMcpToolCallResult(
-  result: AgentCoreMcpSdkCallToolResult
+  result: AgentCoreMcpSdkCallToolResult,
 ): AgentCoreMcpToolCallResult {
-  if ('toolResult' in result) {
+  if ("toolResult" in result) {
     return {
-      content: result.toolResult
-    }
+      content: result.toolResult,
+    };
   }
 
   const content =
@@ -35,13 +35,13 @@ export function toAgentCoreMcpToolCallResult(
       ? result.content
       : {
           content: result.content,
-          structuredContent: result.structuredContent
-        }
+          structuredContent: result.structuredContent,
+        };
   const mapped: AgentCoreMcpToolCallResult = {
-    content
-  }
+    content,
+  };
   if (result.isError !== undefined) {
-    mapped.isError = result.isError
+    mapped.isError = result.isError;
   }
-  return mapped
+  return mapped;
 }

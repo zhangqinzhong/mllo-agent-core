@@ -3,28 +3,85 @@
   "version": "0.1.0",
   "description": "A TypeScript agent runtime core for model loops, tools, sessions, MCP, hooks, skills, permissions, and workflows.",
   "license": "MIT",
-  "type": "commonjs",
-  "main": "dist/src/index.js",
-  "types": "dist/src/index.d.ts",
+  "bin": {
+    "mllo": "./dist/src/cli/mllo-cli.js"
+  },
   "files": [
     "dist",
     "README.md",
+    "README.zh-CN.md",
+    "LICENSE",
     "docs"
   ],
-  "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "build": "tsc -p tsconfig.json",
-    "clean": "rm -rf dist"
+  "type": "commonjs",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "require": "./dist/src/index.js",
+      "default": "./dist/src/index.js"
+    },
+    "./claude-sdk": {
+      "types": "./dist/src/agent-integrations/claude-sdk/index.d.ts",
+      "require": "./dist/src/agent-integrations/claude-sdk/index.js",
+      "default": "./dist/src/agent-integrations/claude-sdk/index.js"
+    },
+    "./codex-cli": {
+      "types": "./dist/src/agent-integrations/codex-cli/index.d.ts",
+      "require": "./dist/src/agent-integrations/codex-cli/index.js",
+      "default": "./dist/src/agent-integrations/codex-cli/index.js"
+    },
+    "./observer": {
+      "types": "./dist/src/observer/index.d.ts",
+      "require": "./dist/src/observer/index.js",
+      "default": "./dist/src/observer/index.js"
+    },
+    "./package.json": "./package.json"
   },
-  "engines": {
-    "node": ">=22.5.0"
+  "scripts": {
+    "lint": "oxlint src tests config",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "verify": "npm run lint && npm run typecheck && npm test && npm run clean && npm run build && npm run pack:check && npm run smoke:cli",
+    "pack:check": "npm pack --dry-run --json | node config/scripts/verify-pack.mjs",
+    "smoke:cli": "node dist/src/cli/mllo-cli.js --help",
+    "build": "tsc -p tsconfig.json",
+    "clean": "node config/scripts/clean-dist.mjs",
+    "prepare": "husky"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "zod": "~4.4.3"
   },
   "devDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.199",
     "@types/node": "^25.6.0",
-    "typescript": "^5.9.3"
+    "husky": "^9.1.7",
+    "lint-staged": "^17.0.8",
+    "oxfmt": "^0.57.0",
+    "oxlint": "^1.72.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.5"
+  },
+  "peerDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.199"
+  },
+  "peerDependenciesMeta": {
+    "@anthropic-ai/claude-agent-sdk": {
+      "optional": true
+    }
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx,mjs,mts,cts}": [
+      "oxlint",
+      "oxfmt --write"
+    ],
+    "*.{json,css}": [
+      "oxfmt --write"
+    ]
+  },
+  "engines": {
+    "node": ">=22.5.0"
   }
 }

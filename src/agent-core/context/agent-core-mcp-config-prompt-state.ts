@@ -1,74 +1,77 @@
-import { readFile } from 'node:fs/promises'
-import { inspectMcpConfigContent, type McpServerSummary } from '../../../shared/mcp-config'
-import { listAgentCoreMcpConfigSearchEntries } from '../mcp/agent-core-mcp-config-search'
+import { readFile } from "node:fs/promises";
+import {
+  inspectMcpConfigContent,
+  type McpServerSummary,
+} from "../mcp/agent-core-mcp-config-schema";
+import { listAgentCoreMcpConfigSearchEntries } from "../mcp/agent-core-mcp-config-search";
 
 export type AgentCoreMcpConfigPromptServer = {
-  name: string
-  transport: McpServerSummary['transport']
-  status: McpServerSummary['status']
-  command?: string
-  url?: string
-  issue?: string
-}
+  name: string;
+  transport: McpServerSummary["transport"];
+  status: McpServerSummary["status"];
+  command?: string;
+  url?: string;
+  issue?: string;
+};
 
 export type AgentCoreMcpConfigPromptRecord = {
-  label: string
-  path: string
-  status: 'valid' | 'invalid'
-  servers: AgentCoreMcpConfigPromptServer[]
-  error?: string
-}
+  label: string;
+  path: string;
+  status: "valid" | "invalid";
+  servers: AgentCoreMcpConfigPromptServer[];
+  error?: string;
+};
 
 async function readOptionalTextFile(path: string): Promise<string | null> {
-  return await readFile(path, 'utf8').catch((error: unknown) => {
-    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
-      return null
+  return await readFile(path, "utf8").catch((error: unknown) => {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return null;
     }
-    throw error
-  })
+    throw error;
+  });
 }
 
 function createPromptServer(server: McpServerSummary): AgentCoreMcpConfigPromptServer {
   const promptServer: AgentCoreMcpConfigPromptServer = {
     name: server.name,
     transport: server.transport,
-    status: server.status
-  }
+    status: server.status,
+  };
   if (server.command !== undefined) {
-    promptServer.command = server.command
+    promptServer.command = server.command;
   }
   if (server.url !== undefined) {
-    promptServer.url = server.url
+    promptServer.url = server.url;
   }
   if (server.issue !== undefined) {
-    promptServer.issue = server.issue
+    promptServer.issue = server.issue;
   }
-  return promptServer
+  return promptServer;
 }
 
 // 读取 workspace 内常见 MCP 配置。只注入摘要，避免 prompt 泄露 env secret。
 export async function readAgentCoreMcpConfigPromptState(args: {
-  cwd: string
+  cwd: string;
 }): Promise<AgentCoreMcpConfigPromptRecord[]> {
-  const records: AgentCoreMcpConfigPromptRecord[] = []
+  const records: AgentCoreMcpConfigPromptRecord[] = [];
   for (const entry of listAgentCoreMcpConfigSearchEntries({ cwd: args.cwd })) {
     const inspection = inspectMcpConfigContent(
       entry.candidate,
-      await readOptionalTextFile(entry.configPath)
-    )
+      await readOptionalTextFile(entry.configPath),
+    );
     if (!inspection.exists) {
-      continue
+      continue;
     }
     const record: AgentCoreMcpConfigPromptRecord = {
       label: entry.candidate.label,
       path: entry.displayPath,
-      status: inspection.status === 'invalid' ? 'invalid' : 'valid',
-      servers: inspection.servers.map(createPromptServer)
-    }
+      status: inspection.status === "invalid" ? "invalid" : "valid",
+      servers: inspection.servers.map(createPromptServer),
+    };
     if (inspection.error !== undefined) {
-      record.error = inspection.error
+      record.error = inspection.error;
     }
-    records.push(record)
+    records.push(record);
   }
-  return records
+  return records;
 }

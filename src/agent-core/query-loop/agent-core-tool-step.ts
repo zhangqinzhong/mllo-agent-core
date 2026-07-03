@@ -1,36 +1,39 @@
-import { runAgentCoreHooks } from '../hooks/agent-core-hook-runner'
-import { appendMissingToolResults } from './agent-core-tool-result-pairing'
+import { runAgentCoreHooks } from "../hooks/agent-core-hook-runner";
+import { appendMissingToolResults } from "./agent-core-tool-result-pairing";
 import {
   createAgentCoreDuplicateToolCallTracker,
   hasAgentCoreDuplicateToolCall,
   markAgentCoreDuplicateToolCall,
-  type AgentCoreDuplicateToolCallTracker
-} from './agent-core-duplicate-tool-call'
-import { runExecutableAgentCoreToolCallsStep } from './agent-core-executable-tool-calls-step'
-import { createAgentCoreRepeatedToolFailureResult } from './agent-core-repeated-tool-failure'
-import { createAgentCoreToolFailureFeedback } from './agent-core-tool-failure-feedback'
+  type AgentCoreDuplicateToolCallTracker,
+} from "./agent-core-duplicate-tool-call";
+import { runExecutableAgentCoreToolCallsStep } from "./agent-core-executable-tool-calls-step";
+import { createAgentCoreRepeatedToolFailureResult } from "./agent-core-repeated-tool-failure";
+import { createAgentCoreToolFailureFeedback } from "./agent-core-tool-failure-feedback";
 import type {
   AgentCoreToolCall,
   AgentCoreToolExecutionResult,
-  AgentCoreToolResult
-} from '../tools/agent-core-tool-types'
-import type { PreExecutedToolCall } from './agent-core-model-turn'
+  AgentCoreToolResult,
+} from "../tools/agent-core-tool-types";
+import {
+  settlePreExecutedToolCall,
+  type PreExecutedToolCall,
+} from "./agent-core-pre-executed-tool-call";
 import type {
   AgentCoreMessage,
   AgentCoreQueryEvent,
   AgentCoreQueryLoopArgs,
-  AgentCoreQueryLoopResult
-} from './agent-core-query-types'
-import type { AgentCoreMiddlewareChain } from '../middleware/agent-core-middleware-chain'
+  AgentCoreQueryLoopResult,
+} from "./agent-core-query-types";
+import type { AgentCoreMiddlewareChain } from "../middleware/agent-core-middleware-chain";
 
 // 把工具执行结果转换成模型能继续消费的 tool 消息。
 function appendToolMessage(
   messages: AgentCoreMessage[],
   call: AgentCoreToolCall,
-  result: AgentCoreToolResult
+  result: AgentCoreToolResult,
 ): AgentCoreMessage {
   const message: AgentCoreMessage = {
-    role: 'tool',
+    role: "tool",
     toolCallId: call.id,
     name: call.name,
     content: result.content,
@@ -42,199 +45,199 @@ function appendToolMessage(
       : { outputOriginalChars: result.outputOriginalChars }),
     ...(result.outputMaxChars === undefined ? {} : { outputMaxChars: result.outputMaxChars }),
     ...(result.outputBlobPath === undefined ? {} : { outputBlobPath: result.outputBlobPath }),
-    ...(result.outputBlobBytes === undefined ? {} : { outputBlobBytes: result.outputBlobBytes })
-  }
-  messages.push(message)
-  return message
+    ...(result.outputBlobBytes === undefined ? {} : { outputBlobBytes: result.outputBlobBytes }),
+  };
+  messages.push(message);
+  return message;
 }
 
 // 把未注册工具转换成普通工具错误。模型看到 tool_result 后才能自己修正工具名。
 function toolExecutionResultContent(
   call: AgentCoreToolCall,
-  execution: AgentCoreToolExecutionResult
+  execution: AgentCoreToolExecutionResult,
 ): AgentCoreToolResult {
   switch (execution.status) {
-    case 'ok':
+    case "ok":
       return createAgentCoreToolFailureFeedback({
         call,
-        result: execution.result
-      })
-    case 'not-found':
+        result: execution.result,
+      });
+    case "not-found":
       return createAgentCoreToolFailureFeedback({
         call,
         result: {
           content: execution.message,
           isError: true,
-          errorKind: 'unknown-tool'
-        }
-      })
-    case 'permission-required':
-    case 'permission-denied':
+          errorKind: "unknown-tool",
+        },
+      });
+    case "permission-required":
+    case "permission-denied":
       return {
         content: execution.decision.reason,
         isError: true,
-        errorKind: 'tool-error'
-      }
+        errorKind: "tool-error",
+      };
   }
 }
 
 // 检测 ask_user 这类需要用户输入的结果；它必须暂停 query loop，而不是写成普通 tool_result。
 function elicitationFromExecution(
-  execution: AgentCoreToolExecutionResult
-): AgentCoreToolResult['elicitation'] {
-  return execution.status === 'ok' ? execution.result.elicitation : undefined
+  execution: AgentCoreToolExecutionResult,
+): AgentCoreToolResult["elicitation"] {
+  return execution.status === "ok" ? execution.result.elicitation : undefined;
 }
 
 // 把重复失败 guard 转成普通工具执行结果。query loop 后续仍按 tool_result 闭环处理。
 function repeatedToolFailureExecution(
   messages: readonly AgentCoreMessage[],
-  call: AgentCoreToolCall
+  call: AgentCoreToolCall,
 ): AgentCoreToolExecutionResult | undefined {
   const result = createAgentCoreRepeatedToolFailureResult({
     messages,
-    call
-  })
+    call,
+  });
   return result === undefined
     ? undefined
     : {
-        status: 'ok',
-        result
-      }
+        status: "ok",
+        result,
+      };
 }
 
 // 生成无需真实执行的工具结果。先挡同轮重复，再挡跨轮原样重复失败。
 function syntheticToolExecution(args: {
-  duplicateTracker: AgentCoreDuplicateToolCallTracker
-  messages: readonly AgentCoreMessage[]
-  call: AgentCoreToolCall
+  duplicateTracker: AgentCoreDuplicateToolCallTracker;
+  messages: readonly AgentCoreMessage[];
+  call: AgentCoreToolCall;
 }): AgentCoreToolExecutionResult | undefined {
   const duplicate = markAgentCoreDuplicateToolCall({
     tracker: args.duplicateTracker,
-    call: args.call
-  })
+    call: args.call,
+  });
   if (duplicate !== undefined) {
-    return duplicate
+    return duplicate;
   }
-  return repeatedToolFailureExecution(args.messages, args.call)
+  return repeatedToolFailureExecution(args.messages, args.call);
 }
 
 // 处理工具完成事件。权限暂停/拒绝会返回终态，普通结果会回灌给下一轮模型。
 async function* handleToolCompletion(args: {
-  queryArgs: AgentCoreQueryLoopArgs
-  messages: AgentCoreMessage[]
-  call: AgentCoreToolCall
-  execution: AgentCoreToolExecutionResult
-  middlewareChain: AgentCoreMiddlewareChain
-  remainingCalls?: readonly AgentCoreToolCall[]
+  queryArgs: AgentCoreQueryLoopArgs;
+  messages: AgentCoreMessage[];
+  call: AgentCoreToolCall;
+  execution: AgentCoreToolExecutionResult;
+  middlewareChain: AgentCoreMiddlewareChain;
+  remainingCalls?: readonly AgentCoreToolCall[];
 }): AsyncGenerator<AgentCoreQueryEvent, AgentCoreQueryLoopResult | null> {
-  const remainingCalls = args.remainingCalls ?? []
-  const { call, execution, messages, queryArgs } = args
+  const remainingCalls = args.remainingCalls ?? [];
+  const { call, execution, messages, queryArgs } = args;
 
-  if (execution.status === 'permission-required') {
+  if (execution.status === "permission-required") {
     yield {
-      type: 'permission-required',
+      type: "permission-required",
       call,
-      decision: execution.decision
-    }
+      decision: execution.decision,
+    };
     return {
-      status: 'waiting-for-permission',
+      status: "waiting-for-permission",
       messages,
       call,
-      decision: execution.decision
-    }
+      decision: execution.decision,
+    };
   }
 
-  if (execution.status === 'permission-denied') {
+  if (execution.status === "permission-denied") {
     yield {
-      type: 'permission-denied',
+      type: "permission-denied",
       call,
-      decision: execution.decision
-    }
+      decision: execution.decision,
+    };
     return {
-      status: 'denied',
+      status: "denied",
       messages,
       call,
-      decision: execution.decision
-    }
+      decision: execution.decision,
+    };
   }
 
-  const elicitation = elicitationFromExecution(execution)
+  const elicitation = elicitationFromExecution(execution);
   if (elicitation !== undefined) {
     const hookDecision = yield* runAgentCoreHooks({
       hooks: queryArgs.hooks ?? [],
       context: {
-        phase: 'elicitation',
+        phase: "elicitation",
         cwd: queryArgs.cwd,
         call,
         elicitationRequest: elicitation,
-        signal: queryArgs.signal
-      }
-    })
-    if (hookDecision.action === 'block') {
-      const message = hookDecision.reason ?? 'Elicitation hook blocked ask_user.'
+        signal: queryArgs.signal,
+      },
+    });
+    if (hookDecision.action === "block") {
+      const message = hookDecision.reason ?? "Elicitation hook blocked ask_user.";
       yield {
-        type: 'error',
-        message
-      }
+        type: "error",
+        message,
+      };
       return {
-        status: 'error',
+        status: "error",
         messages,
-        message
-      }
+        message,
+      };
     }
     yield* appendMissingToolResults(
       messages,
       remainingCalls,
-      'Skipped because ask_user paused for user input. Ask one question at a time and continue after the user answers.'
-    )
+      "Skipped because ask_user paused for user input. Ask one question at a time and continue after the user answers.",
+    );
     yield {
-      type: 'elicitation-required',
+      type: "elicitation-required",
       call,
-      request: elicitation
-    }
+      request: elicitation,
+    };
     return {
-      status: 'waiting-for-elicitation',
+      status: "waiting-for-elicitation",
       messages,
       call,
-      request: elicitation
-    }
+      request: elicitation,
+    };
   }
 
-  const result = toolExecutionResultContent(call, execution)
-  appendToolMessage(messages, call, result)
+  const result = toolExecutionResultContent(call, execution);
+  appendToolMessage(messages, call, result);
   await args.middlewareChain.afterTool({
     queryArgs,
     messages,
     call,
     execution,
-    result
-  })
+    result,
+  });
   yield {
-    type: 'tool-result',
+    type: "tool-result",
     call,
-    result
-  }
-  return null
+    result,
+  };
+  return null;
 }
 
 // 运行一组工具调用。编排层负责并发/串行，query loop 只处理事件和终态。
 export async function* runToolCallsStep(args: {
-  queryArgs: AgentCoreQueryLoopArgs
-  messages: AgentCoreMessage[]
-  calls: readonly AgentCoreToolCall[]
-  preExecutedToolCalls: Map<string, PreExecutedToolCall>
-  middlewareChain: AgentCoreMiddlewareChain
-  turn: number
+  queryArgs: AgentCoreQueryLoopArgs;
+  messages: AgentCoreMessage[];
+  calls: readonly AgentCoreToolCall[];
+  preExecutedToolCalls: Map<string, PreExecutedToolCall>;
+  middlewareChain: AgentCoreMiddlewareChain;
+  turn: number;
 }): AsyncGenerator<AgentCoreQueryEvent, AgentCoreQueryLoopResult | null> {
-  const duplicateTracker = createAgentCoreDuplicateToolCallTracker()
+  const duplicateTracker = createAgentCoreDuplicateToolCallTracker();
   const remainingCallsAfter = (call: AgentCoreToolCall): readonly AgentCoreToolCall[] => {
-    const index = args.calls.findIndex((candidate) => candidate.id === call.id)
-    return index >= 0 ? args.calls.slice(index + 1) : []
-  }
+    const index = args.calls.findIndex((candidate) => candidate.id === call.id);
+    return index >= 0 ? args.calls.slice(index + 1) : [];
+  };
   const onToolComplete = (input: {
-    call: AgentCoreToolCall
-    execution: AgentCoreToolExecutionResult
-    remainingCalls?: readonly AgentCoreToolCall[]
+    call: AgentCoreToolCall;
+    execution: AgentCoreToolExecutionResult;
+    remainingCalls?: readonly AgentCoreToolCall[];
   }) =>
     handleToolCompletion({
       queryArgs: args.queryArgs,
@@ -242,37 +245,40 @@ export async function* runToolCallsStep(args: {
       call: input.call,
       execution: input.execution,
       middlewareChain: args.middlewareChain,
-      remainingCalls: input.remainingCalls
-    })
+      remainingCalls: input.remainingCalls,
+    });
 
   for (const call of args.calls.filter((item) => args.preExecutedToolCalls.has(item.id))) {
-    const preExecuted = args.preExecutedToolCalls.get(call.id)
+    const preExecuted = args.preExecutedToolCalls.get(call.id);
     if (preExecuted === undefined) {
-      continue
+      continue;
     }
     const syntheticExecution = syntheticToolExecution({
       duplicateTracker,
       messages: args.messages,
-      call
-    })
+      call,
+    });
+    if (syntheticExecution !== undefined) {
+      await settlePreExecutedToolCall(preExecuted);
+    }
     const result = yield* handleToolCompletion({
       queryArgs: args.queryArgs,
       messages: args.messages,
       call,
       execution: syntheticExecution ?? (await preExecuted.execution),
       middlewareChain: args.middlewareChain,
-      remainingCalls: remainingCallsAfter(call)
-    })
+      remainingCalls: remainingCallsAfter(call),
+    });
     if (result !== null) {
-      return result
+      return result;
     }
   }
 
-  const remainingCalls = args.calls.filter((call) => !args.preExecutedToolCalls.has(call.id))
+  const remainingCalls = args.calls.filter((call) => !args.preExecutedToolCalls.has(call.id));
   if (
     !hasAgentCoreDuplicateToolCall({
       tracker: duplicateTracker,
-      calls: remainingCalls
+      calls: remainingCalls,
     }) &&
     !remainingCalls.some((call) => repeatedToolFailureExecution(args.messages, call) !== undefined)
   ) {
@@ -282,33 +288,33 @@ export async function* runToolCallsStep(args: {
       calls: remainingCalls,
       middlewareChain: args.middlewareChain,
       remainingCallsAfter,
-      onToolComplete
-    })
+      onToolComplete,
+    });
   }
 
   for (const call of remainingCalls) {
     const syntheticExecution = syntheticToolExecution({
       duplicateTracker,
       messages: args.messages,
-      call
-    })
+      call,
+    });
     if (syntheticExecution !== undefined) {
       yield {
-        type: 'tool-call',
-        call
-      }
+        type: "tool-call",
+        call,
+      };
       const result = yield* handleToolCompletion({
         queryArgs: args.queryArgs,
         messages: args.messages,
         call,
         execution: syntheticExecution,
         middlewareChain: args.middlewareChain,
-        remainingCalls: remainingCallsAfter(call)
-      })
+        remainingCalls: remainingCallsAfter(call),
+      });
       if (result !== null) {
-        return result
+        return result;
       }
-      continue
+      continue;
     }
     const result = yield* runExecutableAgentCoreToolCallsStep({
       queryArgs: args.queryArgs,
@@ -316,12 +322,12 @@ export async function* runToolCallsStep(args: {
       calls: [call],
       middlewareChain: args.middlewareChain,
       remainingCallsAfter,
-      onToolComplete
-    })
+      onToolComplete,
+    });
     if (result !== null) {
-      return result
+      return result;
     }
   }
 
-  return null
+  return null;
 }

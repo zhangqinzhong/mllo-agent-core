@@ -1,73 +1,73 @@
-import { mkdirSync } from 'node:fs'
-import { dirname } from 'node:path'
-import Database from '../../sqlite/sync-database'
-import { createMlloStateSchema, getMlloStateSchemaVersion } from './mllo-state-schema'
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+import SyncDatabase, { type SyncDatabaseHandle } from "../../sqlite/sync-database";
+import { createMlloStateSchema, getMlloStateSchemaVersion } from "./mllo-state-schema";
 import {
   toMlloTaskRecord,
   stringifyMlloTaskLinks,
   type MlloTaskRecord,
-  type MlloTaskRow
-} from './mllo-task-records'
+  type MlloTaskRow,
+} from "./mllo-task-records";
 import {
   listMlloCheckpointRestoreFiles,
   listMlloCheckpointRestoresForThread,
   upsertMlloCheckpointRestore,
   type MlloCheckpointRestoreFileRecord,
-  type MlloCheckpointRestoreRecord
-} from './mllo-checkpoint-restore-records'
+  type MlloCheckpointRestoreRecord,
+} from "./mllo-checkpoint-restore-records";
 import {
   listMlloWorkerToolEventPairsForThread,
   listMlloWorkerToolEventsForThread,
   upsertMlloWorkerToolEvent,
   type MlloWorkerToolEventPair,
-  type MlloWorkerToolEventRecord
-} from './mllo-worker-tool-event-records'
+  type MlloWorkerToolEventRecord,
+} from "./mllo-worker-tool-event-records";
 import {
   toMlloTeamMemberRecord,
   stringifyMlloSubscriptions,
   type MlloTeamMemberRecord,
-  type MlloTeamMemberRow
-} from './mllo-team-records'
+  type MlloTeamMemberRow,
+} from "./mllo-team-records";
 import {
   toMlloThreadEdgeRecord,
   toMlloThreadRecord,
   type MlloThreadEdgeRecord,
   type MlloThreadEdgeRow,
   type MlloThreadRecord,
-  type MlloThreadRow
-} from './mllo-thread-records'
+  type MlloThreadRow,
+} from "./mllo-thread-records";
 
 export type MlloStateStoreOptions = {
-  dbPath: string | ':memory:'
-}
+  dbPath: string | ":memory:";
+};
 
 // SQLite 当前态索引。JSONL 是事实来源，state.sqlite 只服务 GUI 和调度器快速查询。
 export class MlloStateStore {
-  private readonly db: Database.Database
+  private readonly db: SyncDatabaseHandle;
 
   // 打开或创建 mllo state.sqlite，并立即确保第一版 schema 可用。
   constructor(options: MlloStateStoreOptions) {
-    const dbPath = options.dbPath
-    if (dbPath !== ':memory:') {
+    const dbPath = options.dbPath;
+    if (dbPath !== ":memory:") {
       mkdirSync(dirname(dbPath), {
-        recursive: true
-      })
+        recursive: true,
+      });
     }
-    this.db = new Database(dbPath)
-    this.db.pragma('journal_mode = WAL')
-    this.db.pragma('synchronous = NORMAL')
-    this.db.pragma('busy_timeout = 5000')
-    createMlloStateSchema(this.db)
+    this.db = new SyncDatabase(dbPath);
+    this.db.pragma("journal_mode = WAL");
+    this.db.pragma("synchronous = NORMAL");
+    this.db.pragma("busy_timeout = 5000");
+    createMlloStateSchema(this.db);
   }
 
   // 关闭 SQLite 连接，测试和应用退出时都应显式释放文件句柄。
   close(): void {
-    this.db.close()
+    this.db.close();
   }
 
   // 返回当前 schema 版本，方便迁移测试确认 state.sqlite 的结构来源。
   getSchemaVersion(): number {
-    return getMlloStateSchemaVersion(this.db)
+    return getMlloStateSchemaVersion(this.db);
   }
 
   // 清空派生索引表。JSONL transcript 仍然保留，reindex 会从事实日志重新生成这些行。
@@ -80,7 +80,7 @@ export class MlloStateStore {
       DELETE FROM tasks;
       DELETE FROM thread_edges;
       DELETE FROM threads;
-    `)
+    `);
   }
 
   // 写入或更新 thread 当前状态，rollout JSONL 仍然是事实记录来源。
@@ -110,7 +110,7 @@ export class MlloStateStore {
             archived = excluded.archived,
             preview = excluded.preview,
             updated_at_ms = excluded.updated_at_ms
-        `
+        `,
       )
       .run(
         record.id,
@@ -129,31 +129,31 @@ export class MlloStateStore {
         record.archived ? 1 : 0,
         record.preview,
         record.createdAtMs,
-        record.updatedAtMs
-      )
-    return this.getThread(record.id) ?? record
+        record.updatedAtMs,
+      );
+    return this.getThread(record.id) ?? record;
   }
 
   // 按 id 读取 thread 当前状态，GUI 打开单个会话时走这个索引。
   getThread(threadId: string): MlloThreadRecord | undefined {
-    const row = this.db.prepare('SELECT * FROM threads WHERE id = ?').get(threadId) as
+    const row = this.db.prepare("SELECT * FROM threads WHERE id = ?").get(threadId) as
       | MlloThreadRow
-      | undefined
-    return row === undefined ? undefined : toMlloThreadRecord(row)
+      | undefined;
+    return row === undefined ? undefined : toMlloThreadRecord(row);
   }
 
   // 列出最近更新的 thread，默认排除归档项以服务 运行态首页。
   listThreads(options: { includeArchived?: boolean; limit?: number } = {}): MlloThreadRecord[] {
-    const includeArchived = options.includeArchived ?? false
-    const limit = options.limit ?? 100
+    const includeArchived = options.includeArchived ?? false;
+    const limit = options.limit ?? 100;
     const rows = includeArchived
       ? (this.db
-          .prepare('SELECT * FROM threads ORDER BY updated_at_ms DESC LIMIT ?')
+          .prepare("SELECT * FROM threads ORDER BY updated_at_ms DESC LIMIT ?")
           .all(limit) as MlloThreadRow[])
       : (this.db
-          .prepare('SELECT * FROM threads WHERE archived = 0 ORDER BY updated_at_ms DESC LIMIT ?')
-          .all(limit) as MlloThreadRow[])
-    return rows.map(toMlloThreadRecord)
+          .prepare("SELECT * FROM threads WHERE archived = 0 ORDER BY updated_at_ms DESC LIMIT ?")
+          .all(limit) as MlloThreadRow[]);
+    return rows.map(toMlloThreadRecord);
   }
 
   // 记录父子 thread 关系，让自研 agent 能追踪委派出来的子任务会话。
@@ -166,19 +166,19 @@ export class MlloStateStore {
           ON CONFLICT(child_thread_id) DO UPDATE SET
             parent_thread_id = excluded.parent_thread_id,
             status = excluded.status
-        `
+        `,
       )
-      .run(record.parentThreadId, record.childThreadId, record.status, record.createdAtMs)
-    return record
+      .run(record.parentThreadId, record.childThreadId, record.status, record.createdAtMs);
+    return record;
   }
 
   // 列出某个 parent thread 派生出的 child thread，后续用于 GUI 展示协作树。
   listThreadEdges(parentThreadId: string): MlloThreadEdgeRecord[] {
     return (
       this.db
-        .prepare('SELECT * FROM thread_edges WHERE parent_thread_id = ? ORDER BY created_at_ms ASC')
+        .prepare("SELECT * FROM thread_edges WHERE parent_thread_id = ? ORDER BY created_at_ms ASC")
         .all(parentThreadId) as MlloThreadEdgeRow[]
-    ).map(toMlloThreadEdgeRecord)
+    ).map(toMlloThreadEdgeRecord);
   }
 
   // 写入或更新 task 当前状态，task DAG 和 workflow 进度都先落这个索引。
@@ -200,7 +200,7 @@ export class MlloStateStore {
             blocked_by_json = excluded.blocked_by_json,
             blocks_json = excluded.blocks_json,
             updated_at_ms = excluded.updated_at_ms
-        `
+        `,
       )
       .run(
         record.id,
@@ -212,26 +212,26 @@ export class MlloStateStore {
         stringifyMlloTaskLinks(record.blockedBy),
         stringifyMlloTaskLinks(record.blocks),
         record.createdAtMs,
-        record.updatedAtMs
-      )
-    return this.getTask(record.id) ?? record
+        record.updatedAtMs,
+      );
+    return this.getTask(record.id) ?? record;
   }
 
   // 按 id 读取 task 当前状态，供 workflow UI 和调度器快速定位任务。
   getTask(taskId: string): MlloTaskRecord | undefined {
-    const row = this.db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as
+    const row = this.db.prepare("SELECT * FROM tasks WHERE id = ?").get(taskId) as
       | MlloTaskRow
-      | undefined
-    return row === undefined ? undefined : toMlloTaskRecord(row)
+      | undefined;
+    return row === undefined ? undefined : toMlloTaskRecord(row);
   }
 
   // 列出 thread 下的任务，宿主应用可用它渲染 workflow / task 面板。
   listTasksForThread(threadId: string): MlloTaskRecord[] {
     return (
       this.db
-        .prepare('SELECT * FROM tasks WHERE thread_id = ? ORDER BY updated_at_ms ASC')
+        .prepare("SELECT * FROM tasks WHERE thread_id = ? ORDER BY updated_at_ms ASC")
         .all(threadId) as MlloTaskRow[]
-    ).map(toMlloTaskRecord)
+    ).map(toMlloTaskRecord);
   }
 
   // 写入或更新团队成员状态，第三方 agent worker 也要被 mllo 自己索引。
@@ -252,7 +252,7 @@ export class MlloStateStore {
             subscriptions_json = excluded.subscriptions_json,
             runtime_handle = excluded.runtime_handle,
             updated_at_ms = excluded.updated_at_ms
-        `
+        `,
       )
       .run(
         record.teamId,
@@ -264,60 +264,60 @@ export class MlloStateStore {
         stringifyMlloSubscriptions(record.subscriptions),
         record.runtimeHandle ?? null,
         record.joinedAtMs,
-        record.updatedAtMs
-      )
-    return this.getTeamMember(record.teamId, record.agentId) ?? record
+        record.updatedAtMs,
+      );
+    return this.getTeamMember(record.teamId, record.agentId) ?? record;
   }
 
   // 读取单个团队成员，调度器恢复 worker handle 时需要这个索引。
   getTeamMember(teamId: string, agentId: string): MlloTeamMemberRecord | undefined {
     const row = this.db
-      .prepare('SELECT * FROM team_members WHERE team_id = ? AND agent_id = ?')
-      .get(teamId, agentId) as MlloTeamMemberRow | undefined
-    return row === undefined ? undefined : toMlloTeamMemberRecord(row)
+      .prepare("SELECT * FROM team_members WHERE team_id = ? AND agent_id = ?")
+      .get(teamId, agentId) as MlloTeamMemberRow | undefined;
+    return row === undefined ? undefined : toMlloTeamMemberRecord(row);
   }
 
   // 列出团队成员，宿主应用的 worker/participant 面板后续应接这里。
   listTeamMembers(teamId: string): MlloTeamMemberRecord[] {
     return (
       this.db
-        .prepare('SELECT * FROM team_members WHERE team_id = ? ORDER BY updated_at_ms ASC')
+        .prepare("SELECT * FROM team_members WHERE team_id = ? ORDER BY updated_at_ms ASC")
         .all(teamId) as MlloTeamMemberRow[]
-    ).map(toMlloTeamMemberRecord)
+    ).map(toMlloTeamMemberRecord);
   }
 
   // 索引 checkpoint restore 审计事件，GUI 后续可按 thread 查询恢复历史。
   upsertCheckpointRestore(
     record: MlloCheckpointRestoreRecord,
-    files: readonly MlloCheckpointRestoreFileRecord[]
+    files: readonly MlloCheckpointRestoreFileRecord[],
   ): MlloCheckpointRestoreRecord {
-    upsertMlloCheckpointRestore(this.db, record, files)
-    return record
+    upsertMlloCheckpointRestore(this.db, record, files);
+    return record;
   }
 
   // 列出某个 thread 的 checkpoint 恢复记录，来源仍可由 JSONL reindex 重建。
   listCheckpointRestoresForThread(threadId: string): MlloCheckpointRestoreRecord[] {
-    return listMlloCheckpointRestoresForThread(this.db, threadId)
+    return listMlloCheckpointRestoresForThread(this.db, threadId);
   }
 
   // 列出一次 checkpoint restore 涉及的文件结果，供 GUI 做审计详情页。
   listCheckpointRestoreFiles(restoreId: string): MlloCheckpointRestoreFileRecord[] {
-    return listMlloCheckpointRestoreFiles(this.db, restoreId)
+    return listMlloCheckpointRestoreFiles(this.db, restoreId);
   }
 
   // 索引 worker 内部工具审计事件，后续 GUI/CLI 不需要扫描完整 JSONL。
   upsertWorkerToolEvent(record: MlloWorkerToolEventRecord): MlloWorkerToolEventRecord {
-    upsertMlloWorkerToolEvent(this.db, record)
-    return record
+    upsertMlloWorkerToolEvent(this.db, record);
+    return record;
   }
 
   // 列出某个 thread 下所有第三方 worker 的工具 use/result 审计记录。
   listWorkerToolEventsForThread(threadId: string): MlloWorkerToolEventRecord[] {
-    return listMlloWorkerToolEventsForThread(this.db, threadId)
+    return listMlloWorkerToolEventsForThread(this.db, threadId);
   }
 
   // 按 invocationId 配对 use/result，避免审计页用时间顺序猜测对应关系。
   listWorkerToolEventPairsForThread(threadId: string): MlloWorkerToolEventPair[] {
-    return listMlloWorkerToolEventPairsForThread(this.db, threadId)
+    return listMlloWorkerToolEventPairsForThread(this.db, threadId);
   }
 }

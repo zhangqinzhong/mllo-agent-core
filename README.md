@@ -1,69 +1,126 @@
 # mllo Agent Core
 
-mllo Agent Core 是一个 TypeScript 写的 agent runtime core。
+<p align="center">
+  <strong>A TypeScript runtime for building coding agents.</strong>
+</p>
 
-它不包含桌面 UI、Electron 壳、浏览器面板或任何宿主应用代码。它只负责 agent 的核心执行链路：
+<p align="center">
+  <a href="./README.zh-CN.md">简体中文</a>
+  &nbsp;·&nbsp;
+  <a href="./docs/ARCHITECTURE.md">Architecture</a>
+  &nbsp;·&nbsp;
+  <a href="./docs/EMBEDDING.md">Embedding</a>
+  &nbsp;·&nbsp;
+  <a href="./docs/RUNTIME_CONTRACT.md">Runtime Contract</a>
+  &nbsp;·&nbsp;
+  <a href="./LICENSE">MIT License</a>
+</p>
 
-- 模型协议适配：支持 OpenAI-compatible 和 Anthropic-compatible HTTP 协议。
-- Query Loop：多轮模型调用、工具调用、工具结果回灌、停止和恢复。
-- 工具系统：文件读写、grep/glob、shell、计划、工作流、用户询问、外部 worker 委托。
-- 权限系统：路径边界、shell 风险解释、危险命令拦截、权限请求事件。
-- Session：JSONL transcript、索引、resume、thread metadata、文件历史。
-- Context：系统提示词、项目说明、memory、skills、MCP、shell/workflow 状态注入。
-- Budget：上下文预算、compact、工具结果裁剪、文件变更摘要。
-- MCP：stdio、HTTP、SSE / Streamable HTTP client。
-- Hooks：session、tool、permission、compact、cwd、file change 等生命周期扩展点。
-- Runtime state：SQLite 状态索引，避免 GUI 或 CLI 反复扫描 JSONL。
+<p align="center">
+  <img alt="license" src="https://img.shields.io/badge/license-MIT-8b949e.svg?style=flat-square">
+  <img alt="typescript" src="https://img.shields.io/badge/TypeScript-5.9-3178c6.svg?style=flat-square">
+  <img alt="node" src="https://img.shields.io/badge/Node.js-%3E%3D22.5-3c873a.svg?style=flat-square">
+</p>
 
-## 边界
+mllo Agent Core is the runtime layer behind a coding agent. It owns the model
+loop, tool execution, permissions, sessions, context construction, MCP clients,
+hooks, skills, and long-running workflow state.
 
-这个包刻意不做这些事：
+It is deliberately not a desktop app, CLI shell, chat UI, account system, or
+cloud service. Bring your own interface; use this package as the agent engine.
 
-- 不提供 React / Vue / Electron UI。
-- 不绑定某个模型服务商。
-- 不绑定某个外部 agent 产品。
-- 不内置云端账号系统。
-- 不替宿主应用决定权限 UI 怎么展示。
-- 不替宿主应用决定产品形态。
+## Features
 
-宿主应用应该把它当成一个“agent 内核”：
+- **Provider-neutral model loop.** OpenAI-compatible and Anthropic-compatible
+  HTTP providers are normalized into one internal message and tool-call model.
+- **Tool execution runtime.** File reading, writing, search, shell commands,
+  planning, workflows, user questions, worker delegation, and MCP tool calls.
+- **Official worker adapters.** Claude SDK and Codex CLI can be registered as
+  `AgentCoreWorker` instances for `delegate_agent` and `run_agent_workflow`.
+- **Permission-first design.** Path guards, shell risk explanations, saved shell
+  rules, and host-driven approval events are part of the core loop.
+- **Durable sessions.** JSONL transcripts, session indexes, resume windows,
+  thread metadata, file history, worker events, and compact records.
+- **Context management.** System prompts, project instructions, memory, skills,
+  MCP state, shell tasks, workflow state, and context budget collapse.
+- **MCP client support.** stdio, HTTP, SSE, and streamable HTTP transports.
+- **Extensible hooks.** Lifecycle hooks around session start, prompt submit,
+  tools, permissions, compaction, cwd changes, and file changes.
+- **Runtime state index.** SQLite-backed state avoids repeatedly scanning
+  transcripts in host apps.
 
-```text
-Host App / CLI / Server
-        |
-        v
-mllo Agent Core
-        |
-        +-- Model Adapter
-        +-- Tools
-        +-- Session Store
-        +-- Permissions
-        +-- MCP Clients
-        +-- Hooks
+## Install
+
+This package is not published to npm yet. For now, use it from source:
+
+```sh
+git clone <repo-url> mllo-agent-core
+cd mllo-agent-core
+npm install
+npm run build
 ```
 
-## 安装
+In a host project, depend on the local checkout while developing:
 
-```bash
+```json
+{
+  "dependencies": {
+    "@mllo/agent-core": "file:../mllo-agent-core"
+  }
+}
+```
+
+Planned npm package name after publication:
+
+```sh
 npm install @mllo/agent-core
 ```
 
-当前仓库本地开发：
+Local checks:
 
-```bash
-npm install
+```sh
 npm run typecheck
 npm run build
 ```
 
-## 最小用法
+## CLI
+
+The package now includes a thin CLI wrapper around the same runtime controller.
+After building from source, run it directly:
+
+```sh
+node dist/src/cli/mllo-cli.js config init
+node dist/src/cli/mllo-cli.js -p "summarize this project" --permission-mode auto-readonly
+node dist/src/cli/mllo-cli.js chat
+node dist/src/cli/mllo-cli.js observe
+```
+
+When installed or linked as a package, the binary name is `mllo`:
+
+```sh
+mllo config path
+mllo run "inspect package.json" --output-format stream-json
+mllo observe --port 43110
+```
+
+`text` output is for humans, `json` emits one final run envelope, and
+`stream-json` emits one JSON event per line plus the final envelope. This gives
+host apps and benchmarks a stable observability path without depending on a UI.
+
+`mllo observe` starts a read-only local web observer bound to `127.0.0.1` by
+default. It reads `state.sqlite`, `session_index.jsonl`, transcript JSONL files,
+and `dump-prompts` files, then shows sessions, timeline entries, prompt dumps,
+tool events, and raw redacted JSON. It does not execute tools or participate in
+agent decisions.
+
+## Quick Start
 
 ```ts
 import { runAgentCoreController } from '@mllo/agent-core'
 
 for await (const event of runAgentCoreController({
   cwd: process.cwd(),
-  input: '检查当前项目并总结结构',
+  input: 'Inspect this project and summarize its structure.',
   modelProvider: {
     protocol: 'openai',
     baseUrl: 'http://127.0.0.1:1234/v1',
@@ -73,32 +130,108 @@ for await (const event of runAgentCoreController({
   session: {
     configDir: `${process.env.HOME}/.mllo`,
     stateDbPath: `${process.env.HOME}/.mllo/state.sqlite`
+  },
+  onPermissionRequest: async (request) => {
+    console.log('permission requested:', request.reason)
+    return { status: 'allow' }
   }
 })) {
   console.log(event)
 }
 ```
 
-实际宿主应用通常还会传入：
+The controller is an async generator. A host can render events as CLI output,
+GUI timeline items, logs, WebSocket messages, or test assertions.
 
-- `onPermissionRequest`
-- `onElicitationRequest`
-- `workers`
-- `mcpClients`
-- `hooks`
-- `budget`
-- 自定义 `fetchImpl`
-- 自定义 shell execution backend
+## Configuration
+
+You can pass a provider directly:
+
+```ts
+modelProvider: {
+  protocol: 'anthropic',
+  baseUrl: 'https://example.com',
+  apiKey: process.env.MODEL_API_KEY!,
+  model: 'agent-model',
+  maxTokens: 4096,
+  temperature: 0.1
+}
+```
+
+Or load providers from an mllo config file:
+
+```json
+{
+  "defaultProvider": "local-openai",
+  "providers": [
+    {
+      "name": "local-openai",
+      "protocol": "openai",
+      "baseUrl": "http://127.0.0.1:1234/v1",
+      "apiKey": "local-key",
+      "model": "local-model",
+      "promptProfile": "local-compact"
+    }
+  ]
+}
+```
+
+Use `promptProfile: "local-compact"` for small local context windows. Use the
+default full profile when the provider can handle larger system context.
+
+## Claude and Codex Workers
+
+The root package stays model/runtime focused. Worker adapters are exported from
+subpaths so host apps only load what they use:
+
+```ts
+import { createClaudeSdkWorker } from '@mllo/agent-core/claude-sdk'
+import { createCodexCliWorker } from '@mllo/agent-core/codex-cli'
+import { runAgentCoreController } from '@mllo/agent-core'
+
+const workers = [
+  createClaudeSdkWorker(),
+  createCodexCliWorker()
+]
+
+for await (const event of runAgentCoreController({
+  cwd: process.cwd(),
+  input: 'Ask Claude to review and Codex to propose a patch.',
+  modelProvider,
+  session,
+  workers,
+  onWorkerPermissionRequest: async (request) => {
+    console.log('worker permission:', request.workerId, request.reason)
+    return { status: 'allow' }
+  }
+})) {
+  console.log(event)
+}
+```
+
+Prerequisites:
+
+- `@mllo/agent-core/claude-sdk` requires `@anthropic-ai/claude-agent-sdk`.
+  It is an optional peer dependency so importing the root core does not force
+  Claude SDK onto every host.
+- `@mllo/agent-core/codex-cli` requires a working `codex` command on `PATH`, or
+  pass `command` / `spawnImpl` when creating the worker.
+- Both workers route dangerous actions back through the mllo worker permission
+  bridge before running shell or file mutation work.
 
 ## Runtime Home
 
-默认运行态目录建议放在：
+Host apps should pass explicit runtime paths instead of letting the core guess
+where state belongs:
 
-```text
-~/.mllo
+```ts
+session: {
+  configDir: `${home}/.mllo`,
+  stateDbPath: `${home}/.mllo/state.sqlite`
+}
 ```
 
-常见内容：
+Typical runtime files:
 
 ```text
 config.json
@@ -113,31 +246,62 @@ skills/
 dump-prompts/
 ```
 
-`dump-prompts` 默认不启用。需要调试每轮真实 request/response 时，设置：
+## Observability
 
-```bash
+Prompt dumping is disabled by default because it can include private paths,
+tool schemas, messages, and model responses.
+
+Enable it only for local debugging:
+
+```sh
 MLLO_DUMP_PROMPTS=1
 ```
 
-这会写入：
+Dumped requests and responses are written to:
 
 ```text
 ~/.mllo/dump-prompts/<session-id>.jsonl
 ```
 
-注意：这里可能包含完整 prompt、工具 schema、路径和隐私上下文，只适合本地调试。
+Use this when diagnosing provider protocol issues, tool schema bloat, context
+growth, streaming errors, or unexpected model behavior.
 
-## 开源版清洁原则
+## Architecture
 
-这个仓库只保留 mllo Agent Core 自身的抽象、协议和实现。
+```text
+Host App / CLI / Server
+        |
+        v
+runAgentCoreController()
+        |
+        +-- context builder
+        +-- budget and compact
+        +-- model adapter
+        +-- query loop
+        +-- tool runner
+        +-- permission requests
+        +-- session store
+        +-- MCP clients
+        +-- hooks and workers
+```
 
-- 代码注释可以保留中文，因为很多实现约束需要解释“为什么”。
-- 文档不引用其他 agent 产品作为卖点或来源。
-- 测试 fixture 和示例使用通用 worker/model 名称。
-- 第三方模型只以协议类型出现，例如 `openai`、`anthropic`。
+The core does not decide how approval dialogs look, where secrets are stored,
+which model vendor is preferred, or what product surface wraps the runtime.
 
-## 文档
+## What This Package Is Not
 
-- [架构说明](docs/ARCHITECTURE.md)
-- [嵌入指南](docs/EMBEDDING.md)
-- [发布前检查](docs/OPEN_SOURCE_CHECKLIST.md)
+- Not a terminal UI.
+- Not an Electron app.
+- Not a hosted agent service.
+- Not tied to one model vendor.
+- Not tied to one external coding agent.
+- Not a replacement for your product's permission UX.
+
+## Documentation
+
+- [Architecture](./docs/ARCHITECTURE.md)
+- [Embedding guide](./docs/EMBEDDING.md)
+
+## License
+
+MIT. See [LICENSE](./LICENSE).

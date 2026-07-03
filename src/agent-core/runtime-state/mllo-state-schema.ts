@@ -1,70 +1,70 @@
-import type Database from '../../sqlite/sync-database'
+import type { SyncDatabaseHandle } from "../../sqlite/sync-database";
 
-const MLLO_STATE_SCHEMA_VERSION = 8
+const MLLO_STATE_SCHEMA_VERSION = 8;
 
 // 读取表字段集合，迁移时用它做幂等判断，避免新库和旧库路径分叉。
-function getTableColumnNames(db: Database.Database, tableName: string): Set<string> {
-  const rows = db.pragma(`table_info(${tableName})`) as { name: string }[]
-  return new Set(rows.map((row) => row.name))
+function getTableColumnNames(db: SyncDatabaseHandle, tableName: string): Set<string> {
+  const rows = db.pragma(`table_info(${tableName})`) as { name: string }[];
+  return new Set(rows.map((row) => row.name));
 }
 
 // 给旧版 threads 表补齐恢复裁剪统计；新建库已经有这些列，不需要重复 ALTER。
-function migrateThreadsResumeStats(db: Database.Database): void {
-  const columns = getTableColumnNames(db, 'threads')
-  if (!columns.has('resume_omitted_entries')) {
-    db.exec('ALTER TABLE threads ADD COLUMN resume_omitted_entries INTEGER NOT NULL DEFAULT 0')
+function migrateThreadsResumeStats(db: SyncDatabaseHandle): void {
+  const columns = getTableColumnNames(db, "threads");
+  if (!columns.has("resume_omitted_entries")) {
+    db.exec("ALTER TABLE threads ADD COLUMN resume_omitted_entries INTEGER NOT NULL DEFAULT 0");
   }
-  if (!columns.has('resume_omitted_bytes')) {
-    db.exec('ALTER TABLE threads ADD COLUMN resume_omitted_bytes INTEGER NOT NULL DEFAULT 0')
+  if (!columns.has("resume_omitted_bytes")) {
+    db.exec("ALTER TABLE threads ADD COLUMN resume_omitted_bytes INTEGER NOT NULL DEFAULT 0");
   }
 }
 
 // 给旧 thread 补运行生命周期状态，GUI 不再需要从 timeline 里反推终止态。
-function migrateThreadsRunLifecycle(db: Database.Database): void {
-  const columns = getTableColumnNames(db, 'threads')
-  if (!columns.has('run_status')) {
-    db.exec("ALTER TABLE threads ADD COLUMN run_status TEXT NOT NULL DEFAULT 'completed'")
+function migrateThreadsRunLifecycle(db: SyncDatabaseHandle): void {
+  const columns = getTableColumnNames(db, "threads");
+  if (!columns.has("run_status")) {
+    db.exec("ALTER TABLE threads ADD COLUMN run_status TEXT NOT NULL DEFAULT 'completed'");
   }
-  if (!columns.has('run_message')) {
-    db.exec('ALTER TABLE threads ADD COLUMN run_message TEXT')
+  if (!columns.has("run_message")) {
+    db.exec("ALTER TABLE threads ADD COLUMN run_message TEXT");
   }
 }
 
 // 给 worker tool 事件补稳定调用 id，旧库没有这个列时要原地迁移。
-function migrateWorkerToolInvocationId(db: Database.Database): void {
-  const columns = getTableColumnNames(db, 'worker_tool_events')
-  if (!columns.has('invocation_id')) {
-    db.exec('ALTER TABLE worker_tool_events ADD COLUMN invocation_id TEXT')
+function migrateWorkerToolInvocationId(db: SyncDatabaseHandle): void {
+  const columns = getTableColumnNames(db, "worker_tool_events");
+  if (!columns.has("invocation_id")) {
+    db.exec("ALTER TABLE worker_tool_events ADD COLUMN invocation_id TEXT");
   }
 }
 
 // 给 worker tool 结果补输出预算元数据，GUI 审计可以知道输出是否被截断。
-function migrateWorkerToolPayloadBudget(db: Database.Database): void {
-  const columns = getTableColumnNames(db, 'worker_tool_events')
-  if (!columns.has('payload_truncated')) {
-    db.exec('ALTER TABLE worker_tool_events ADD COLUMN payload_truncated INTEGER')
+function migrateWorkerToolPayloadBudget(db: SyncDatabaseHandle): void {
+  const columns = getTableColumnNames(db, "worker_tool_events");
+  if (!columns.has("payload_truncated")) {
+    db.exec("ALTER TABLE worker_tool_events ADD COLUMN payload_truncated INTEGER");
   }
-  if (!columns.has('payload_original_chars')) {
-    db.exec('ALTER TABLE worker_tool_events ADD COLUMN payload_original_chars INTEGER')
+  if (!columns.has("payload_original_chars")) {
+    db.exec("ALTER TABLE worker_tool_events ADD COLUMN payload_original_chars INTEGER");
   }
-  if (!columns.has('payload_max_chars')) {
-    db.exec('ALTER TABLE worker_tool_events ADD COLUMN payload_max_chars INTEGER')
+  if (!columns.has("payload_max_chars")) {
+    db.exec("ALTER TABLE worker_tool_events ADD COLUMN payload_max_chars INTEGER");
   }
 }
 
 // 给 worker tool 结果补完整输出 blob 引用，避免大 stdout 直接写进 SQLite。
-function migrateWorkerToolPayloadBlob(db: Database.Database): void {
-  const columns = getTableColumnNames(db, 'worker_tool_events')
-  if (!columns.has('payload_blob_path')) {
-    db.exec('ALTER TABLE worker_tool_events ADD COLUMN payload_blob_path TEXT')
+function migrateWorkerToolPayloadBlob(db: SyncDatabaseHandle): void {
+  const columns = getTableColumnNames(db, "worker_tool_events");
+  if (!columns.has("payload_blob_path")) {
+    db.exec("ALTER TABLE worker_tool_events ADD COLUMN payload_blob_path TEXT");
   }
-  if (!columns.has('payload_blob_bytes')) {
-    db.exec('ALTER TABLE worker_tool_events ADD COLUMN payload_blob_bytes INTEGER')
+  if (!columns.has("payload_blob_bytes")) {
+    db.exec("ALTER TABLE worker_tool_events ADD COLUMN payload_blob_bytes INTEGER");
   }
 }
 
 // 创建 mllo state.sqlite 第一版表结构，SQLite 只存索引和当前状态。
-export function createMlloStateSchema(db: Database.Database): void {
+export function createMlloStateSchema(db: SyncDatabaseHandle): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS threads (
       id TEXT PRIMARY KEY,
@@ -202,31 +202,31 @@ export function createMlloStateSchema(db: Database.Database): void {
       ON worker_tool_events(thread_id, created_at_ms);
     CREATE INDEX IF NOT EXISTS idx_mllo_worker_tool_events_worker
       ON worker_tool_events(worker_id, kind, created_at_ms);
-  `)
-  const currentVersion = getMlloStateSchemaVersion(db)
+  `);
+  const currentVersion = getMlloStateSchemaVersion(db);
   if (currentVersion < 2) {
-    migrateThreadsResumeStats(db)
+    migrateThreadsResumeStats(db);
   }
   if (currentVersion < 5) {
-    migrateWorkerToolInvocationId(db)
+    migrateWorkerToolInvocationId(db);
   }
   if (currentVersion < 6) {
-    migrateWorkerToolPayloadBudget(db)
+    migrateWorkerToolPayloadBudget(db);
   }
   if (currentVersion < 7) {
-    migrateWorkerToolPayloadBlob(db)
+    migrateWorkerToolPayloadBlob(db);
   }
   if (currentVersion < 8) {
-    migrateThreadsRunLifecycle(db)
+    migrateThreadsRunLifecycle(db);
   }
   if (currentVersion < MLLO_STATE_SCHEMA_VERSION) {
-    db.pragma(`user_version = ${MLLO_STATE_SCHEMA_VERSION}`)
+    db.pragma(`user_version = ${MLLO_STATE_SCHEMA_VERSION}`);
   }
 }
 
 // 读取 schema 版本，后续做迁移时用它判断 state.sqlite 是否需要升级。
-export function getMlloStateSchemaVersion(db: Database.Database): number {
-  return db.pragma('user_version', {
-    simple: true
-  }) as number
+export function getMlloStateSchemaVersion(db: SyncDatabaseHandle): number {
+  return db.pragma("user_version", {
+    simple: true,
+  }) as number;
 }
