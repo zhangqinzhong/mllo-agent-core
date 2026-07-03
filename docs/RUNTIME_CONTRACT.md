@@ -106,6 +106,7 @@ JSONL transcript 是会话事实来源。
 - tool result 必须能和 assistant tool call 配对；compact、resume 和 rewind 类逻辑不能切断配对。
 - schema validation 和 malformed arguments 必须回灌给模型修复，不能静默执行。
 - schema validation feedback 必须包含校验问题、收到的参数预览和期望 schema 预览，帮助模型下一轮直接修正。
+- 仅允许白名单参数别名自动修复；修复必须写入 metadata，不能覆盖已经存在的 canonical 参数。
 - 流式预执行只允许用于工具名已确定、参数 JSON 可信、且工具声明并发安全的调用。
 - 截断 JSON 的修复可以保留为执行候选，但不能在模型 turn 完全结束前预执行。
 

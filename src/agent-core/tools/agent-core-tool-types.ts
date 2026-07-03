@@ -61,12 +61,22 @@ export type AgentCoreToolCallIdRepairStatus = {
   occurrence: number;
 };
 
+export type AgentCoreToolInputRepairStatus = {
+  status: "parameter-alias-renamed";
+  repairs: {
+    from: string;
+    to: string;
+  }[];
+};
+
 // Agent Core 暴露给模型的工具调用。id 用来把结果稳定地回灌给模型。
 export type AgentCoreToolCall = {
   id: string;
   name: string;
   input: unknown;
   inputParseStatus?: AgentCoreToolInputParseStatus;
+  // 只记录确定安全的参数别名修复；schema 不兼容的输入仍交给 validation 失败闭环。
+  inputRepairStatus?: AgentCoreToolInputRepairStatus;
   // 兼容端点偶尔复用 tool id；运行时必须改成唯一 id，同时保留原始 id 方便审计。
   idRepairStatus?: AgentCoreToolCallIdRepairStatus;
 };

@@ -106,6 +106,50 @@ describe("agent core streaming tool calls", () => {
     expect(call.inputParseStatus?.rawPreview).toContain('"path"');
   });
 
+  it("repairs whitelisted file_path aliases without changing tool semantics", () => {
+    const call = createAgentCoreToolCall({
+      id: "call_alias",
+      index: 0,
+      name: "read_file",
+      arguments: {
+        file_path: "README.md",
+        maxBytes: 100,
+      },
+    });
+
+    expect(call.input).toEqual({
+      path: "README.md",
+      maxBytes: 100,
+    });
+    expect(call.inputRepairStatus).toEqual({
+      status: "parameter-alias-renamed",
+      repairs: [
+        {
+          from: "file_path",
+          to: "path",
+        },
+      ],
+    });
+  });
+
+  it("does not let a parameter alias override an explicit canonical path", () => {
+    const call = createAgentCoreToolCall({
+      id: "call_alias_conflict",
+      index: 0,
+      name: "read_file",
+      arguments: {
+        file_path: "wrong.md",
+        path: "README.md",
+      },
+    });
+
+    expect(call.input).toEqual({
+      file_path: "wrong.md",
+      path: "README.md",
+    });
+    expect(call.inputRepairStatus).toBeUndefined();
+  });
+
   it("renames repeated tool call ids and records the original provider id", () => {
     const calls = ensureAgentCoreToolCallsUniqueIds([
       {
@@ -174,5 +218,27 @@ describe("agent core streaming tool calls", () => {
 
     expect(transcript).toContain("idRepairStatus: duplicate-id-renamed");
     expect(transcript).toContain("originalToolCallId: call_same");
+  });
+
+  it("keeps tool input repair metadata in compact transcript text", () => {
+    const call = createAgentCoreToolCall({
+      id: "call_alias",
+      index: 0,
+      name: "read_file",
+      arguments: {
+        file_path: "README.md",
+      },
+    });
+
+    const transcript = renderAgentCoreCompactTranscript([
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [call],
+      },
+    ]);
+
+    expect(transcript).toContain("inputRepairStatus: parameter-alias-renamed");
+    expect(transcript).toContain("inputRepairs: file_path->path");
   });
 });

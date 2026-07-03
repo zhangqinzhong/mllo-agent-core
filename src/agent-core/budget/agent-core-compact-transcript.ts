@@ -17,6 +17,14 @@ function renderToolCalls(message: Extract<AgentCoreMessage, { role: "assistant" 
               `  inputParseStatus: ${call.inputParseStatus.status}`,
               `  rawArgumentsPreview: ${call.inputParseStatus.rawPreview}`,
             ]),
+        ...(call.inputRepairStatus === undefined
+          ? []
+          : [
+              `  inputRepairStatus: ${call.inputRepairStatus.status}`,
+              `  inputRepairs: ${call.inputRepairStatus.repairs
+                .map((repair) => `${repair.from}->${repair.to}`)
+                .join(", ")}`,
+            ]),
         ...(call.idRepairStatus === undefined
           ? []
           : [

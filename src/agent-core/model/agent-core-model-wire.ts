@@ -2,6 +2,7 @@ import type { AgentCoreMessage } from "../query-loop/agent-core-query-types";
 import type {
   AgentCoreToolCall,
   AgentCoreToolDefinition,
+  AgentCoreToolInputRepairStatus,
   AgentCoreToolInputParseStatus,
 } from "../tools/agent-core-tool-types";
 import { toJSONSchema } from "zod";
@@ -19,6 +20,15 @@ const EMPTY_TOOL_SCHEMA: AgentCoreJsonObject = {
   properties: {},
 };
 const RAW_ARGUMENTS_PREVIEW_CHARS = 1000;
+const PATH_BASED_TOOL_NAMES = new Set([
+  "read_file",
+  "list_dir",
+  "write_file",
+  "edit_file",
+  "multi_edit",
+  "glob_files",
+  "grep_files",
+]);
 
 function asAgentCoreJsonObject(value: unknown): AgentCoreJsonObject | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -30,6 +40,40 @@ function removeJsonSchemaDialect(schema: AgentCoreJsonObject): AgentCoreJsonObje
   const copy = { ...schema };
   delete copy.$schema;
   return copy;
+}
+
+function repairAgentCoreToolInputAliases(args: { toolName: string; input: unknown }): {
+  input: unknown;
+  repairStatus?: AgentCoreToolInputRepairStatus;
+} {
+  const inputObject = asAgentCoreJsonObject(args.input);
+  if (
+    inputObject === undefined ||
+    !PATH_BASED_TOOL_NAMES.has(args.toolName) ||
+    !("file_path" in inputObject) ||
+    "path" in inputObject
+  ) {
+    return {
+      input: args.input,
+    };
+  }
+
+  const { file_path: filePath, ...rest } = inputObject;
+  return {
+    input: {
+      ...rest,
+      path: filePath,
+    },
+    repairStatus: {
+      status: "parameter-alias-renamed",
+      repairs: [
+        {
+          from: "file_path",
+          to: "path",
+        },
+      ],
+    },
+  };
 }
 
 function toAgentCoreToolParameters(tool: AgentCoreToolDefinition): AgentCoreJsonObject {
@@ -262,10 +306,15 @@ export function createAgentCoreToolCall(args: {
   arguments: unknown;
 }): AgentCoreToolCall {
   const parsed = parseAgentCoreToolArgumentsWithStatus(args.arguments);
+  const repaired = repairAgentCoreToolInputAliases({
+    toolName: args.name,
+    input: parsed.input,
+  });
   return {
     id: args.id && args.id.length > 0 ? args.id : createFallbackToolCallId(args.index),
     name: args.name,
-    input: parsed.input,
+    input: repaired.input,
     ...(parsed.parseStatus === undefined ? {} : { inputParseStatus: parsed.parseStatus }),
+    ...(repaired.repairStatus === undefined ? {} : { inputRepairStatus: repaired.repairStatus }),
   };
 }

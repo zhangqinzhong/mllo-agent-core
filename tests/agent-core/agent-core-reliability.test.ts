@@ -14,6 +14,7 @@ import { readLatestAgentCoreShellTaskJournal } from "../../src/agent-core/tools/
 import { readAgentCoreShellCwdState } from "../../src/agent-core/tools/shell-cwd-state";
 import { evaluateAgentCorePathPermission } from "../../src/agent-core/permissions/workspace-path-policy";
 import { restoreAgentCoreCheckpointRecord } from "../../src/agent-core/checkpoint/agent-core-checkpoint-restore";
+import { createAgentCoreToolCall } from "../../src/agent-core/model/agent-core-model-wire";
 import type { AgentCoreSessionEntry } from "../../src/agent-core/session/agent-core-session-types";
 import type { AgentCoreToolDefinition } from "../../src/agent-core/tools/agent-core-tool-types";
 import type { AgentCoreCheckpointRecord } from "../../src/agent-core/checkpoint/agent-core-checkpoint-store";
@@ -466,5 +467,89 @@ describe("agent core reliability guards", () => {
     expect(
       events.filter((event) => event.type === "tool-call").map((event) => event.call.id),
     ).toEqual(["call_same", "call_same_2"]);
+  });
+
+  it("runs whitelisted repaired tool input aliases through the query loop", async () => {
+    let receivedInput: unknown;
+    let streamCount = 0;
+    const tool: AgentCoreToolDefinition = {
+      name: "read_file",
+      description: "Read a file.",
+      isConcurrencySafe: () => true,
+      run: async (input) => {
+        receivedInput = input;
+        return {
+          content: "file content",
+        };
+      },
+    };
+
+    const loop = runAgentCoreQueryLoop({
+      cwd: "/tmp/project",
+      messages: [
+        {
+          role: "user",
+          content: "read file",
+        },
+      ],
+      tools: [tool],
+      model: {
+        stream: async function* () {
+          streamCount += 1;
+          if (streamCount === 1) {
+            yield {
+              type: "tool-call",
+              call: createAgentCoreToolCall({
+                id: "call_alias",
+                index: 0,
+                name: "read_file",
+                arguments: {
+                  file_path: "README.md",
+                },
+              }),
+            };
+            yield {
+              type: "message-end",
+            };
+            return;
+          }
+          yield {
+            type: "text-delta",
+            content: "done",
+          };
+          yield {
+            type: "message-end",
+          };
+        },
+      },
+      maxTurns: 3,
+    });
+
+    let result;
+    while (true) {
+      const item = await loop.next();
+      if (item.done === true) {
+        result = item.value;
+        break;
+      }
+    }
+
+    const assistantWithTools = result.messages.find(
+      (message) => message.role === "assistant" && (message.toolCalls?.length ?? 0) > 0,
+    );
+
+    expect(result.status).toBe("completed");
+    expect(receivedInput).toEqual({
+      path: "README.md",
+    });
+    expect(assistantWithTools?.toolCalls?.[0]?.inputRepairStatus).toEqual({
+      status: "parameter-alias-renamed",
+      repairs: [
+        {
+          from: "file_path",
+          to: "path",
+        },
+      ],
+    });
   });
 });
