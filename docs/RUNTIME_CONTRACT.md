@@ -112,6 +112,7 @@ JSONL transcript 是会话事实来源。
 - 权限拒绝必须写成带错误分类的 tool_result；即使 run 进入 denied 终态，也不能留下未闭合的 tool call。
 - query loop 入口和 session resume 都必须修复缺失或错位的 tool_result，不能把悬空 tool_call 发送给模型端点。
 - indexed session resume 必须恢复连续 tail；按预算裁剪时不能跳过中间消息后再恢复更早消息。
+- fallback JSONL session resume 也必须暴露被省略的 entry 数量；没有 side index 的旧会话不能让模型误以为 head/tail 窗口就是完整历史。
 - compact 保留最近 tail 时不能切断 assistant tool_call、对应 tool_result 和紧随其后的 assistant 回复轨迹。
 - indexed session resume 也不能切断 assistant tool_call、对应 tool_result 和紧随其后的 assistant 回复轨迹。
 - 流式预执行只允许用于工具名已确定、参数 JSON 可信、且工具声明并发安全的调用。

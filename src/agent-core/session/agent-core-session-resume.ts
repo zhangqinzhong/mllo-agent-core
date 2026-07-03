@@ -69,7 +69,8 @@ async function readFallbackResumeEntries(args: {
   return {
     resumableEntries: compactIndex >= 0 ? entries.slice(compactIndex + 1) : entries,
     compactEntries: entries.filter(isCompactRecordEntry),
-    omittedResumableEntries: 0,
+    omittedResumableEntries: window.omittedEntries,
+    // 旧 JSONL fallback 没有 side index，无法可靠计算被省略 entry 的字节数。
     omittedResumableBytes: 0,
   };
 }
@@ -128,10 +129,10 @@ function createResumeBoundaryMessage(args: {
     role: "user",
     content: [
       "<mllo_resume_boundary>",
-      "reason: indexed resume budget omitted older post-compact transcript entries",
+      "reason: resume budget omitted older transcript entries",
       `omittedEntries: ${args.omittedEntries}`,
       `omittedBytes: ${args.omittedBytes}`,
-      "note: Earlier post-compact entries are not present in this recovered context. Use compact summaries and memory for older facts; do not assume the visible tail is the full session history.",
+      "note: Earlier entries are not present in this recovered context. Use compact summaries and memory for older facts; do not assume the visible tail is the full session history.",
       "</mllo_resume_boundary>",
     ].join("\n"),
   };
