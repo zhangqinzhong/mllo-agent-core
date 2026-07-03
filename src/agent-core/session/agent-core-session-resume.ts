@@ -49,6 +49,8 @@ type AgentCoreMessageCountCheckpointEntry = Extract<
   messageCount: number;
 };
 
+type AgentCoreMessageEntry = Extract<AgentCoreSessionEntry, { kind: "message" }>;
+
 // 判断 entry 是否是可恢复进 queryLoop 的 message。timeline/hook/budget 只用于 UI 和审计。
 function isMessageEntry(
   entry: AgentCoreSessionEntry,
@@ -117,6 +119,60 @@ function latestMessageCountCheckpointIndexEntry(
   return undefined;
 }
 
+function firstMessageEntry(
+  entries: readonly AgentCoreSessionEntry[],
+): AgentCoreMessageEntry | undefined {
+  return entries.find(isMessageEntry);
+}
+
+function startsAtSafeFallbackBoundary(args: {
+  tailEntries: readonly AgentCoreSessionEntry[];
+  omittedEntries: number;
+}): boolean {
+  const firstMessage = firstMessageEntry(args.tailEntries);
+  if (firstMessage === undefined || args.omittedEntries === 0) {
+    return true;
+  }
+  if (firstMessage.message.role === "user") {
+    return true;
+  }
+  return (
+    firstMessage.message.role === "assistant" && (firstMessage.message.toolCalls?.length ?? 0) > 0
+  );
+}
+
+async function readFallbackResumeWindow(args: {
+  store: AgentCoreJsonlSessionStore;
+  handle: AgentCoreSessionHandle;
+  headEntries: number;
+  tailEntries: number;
+}) {
+  let tailEntries = args.tailEntries;
+  while (true) {
+    const window = await args.store.readSessionWindow(args.handle, {
+      headEntries: args.headEntries,
+      tailEntries,
+    });
+    if (
+      startsAtSafeFallbackBoundary({
+        tailEntries: window.tail,
+        omittedEntries: window.omittedEntries,
+      })
+    ) {
+      return window;
+    }
+    const maxTailEntries = Math.max(
+      0,
+      window.totalEntries - Math.min(args.headEntries, window.totalEntries),
+    );
+    const nextTailEntries = Math.min(maxTailEntries, Math.max(tailEntries + 1, tailEntries * 2));
+    if (nextTailEntries <= tailEntries) {
+      return window;
+    }
+    tailEntries = nextTailEntries;
+  }
+}
+
 // 旧 session 没有 side index 时，继续用 head/tail 窗口恢复，保持向后兼容。
 async function readFallbackResumeEntries(args: {
   store: AgentCoreJsonlSessionStore;
@@ -124,10 +180,7 @@ async function readFallbackResumeEntries(args: {
   headEntries: number;
   tailEntries: number;
 }): Promise<ResumeEntriesResult> {
-  const window = await args.store.readSessionWindow(args.handle, {
-    headEntries: args.headEntries,
-    tailEntries: args.tailEntries,
-  });
+  const window = await readFallbackResumeWindow(args);
   const entries = [...window.head, ...window.tail];
   const compactIndex = latestCompactRecordIndex(entries);
   const checkpoint = latestMessageCountCheckpoint(entries);

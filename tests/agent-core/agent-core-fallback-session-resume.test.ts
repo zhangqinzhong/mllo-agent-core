@@ -23,6 +23,71 @@ function messageEntry(sessionId: string, cwd: string, content: string): AgentCor
   };
 }
 
+function assistantToolCallEntry(
+  sessionId: string,
+  cwd: string,
+  toolCallId: string,
+): AgentCoreSessionEntry {
+  return {
+    kind: "message",
+    uuid: `assistant-${toolCallId}`,
+    timestamp: "2026-01-01T00:00:00.000Z",
+    sessionId,
+    cwd,
+    message: {
+      role: "assistant",
+      content: "",
+      toolCalls: [
+        {
+          id: toolCallId,
+          name: "read_file",
+          input: {
+            path: "README.md",
+          },
+        },
+      ],
+    },
+  };
+}
+
+function toolResultEntry(
+  sessionId: string,
+  cwd: string,
+  toolCallId: string,
+): AgentCoreSessionEntry {
+  return {
+    kind: "message",
+    uuid: `tool-${toolCallId}`,
+    timestamp: "2026-01-01T00:00:00.000Z",
+    sessionId,
+    cwd,
+    message: {
+      role: "tool",
+      toolCallId,
+      name: "read_file",
+      content: "file contents",
+    },
+  };
+}
+
+function assistantTextEntry(
+  sessionId: string,
+  cwd: string,
+  content: string,
+): AgentCoreSessionEntry {
+  return {
+    kind: "message",
+    uuid: `assistant-${content}`,
+    timestamp: "2026-01-01T00:00:00.000Z",
+    sessionId,
+    cwd,
+    message: {
+      role: "assistant",
+      content,
+    },
+  };
+}
+
 function budgetCheckpointEntry(
   sessionId: string,
   cwd: string,
@@ -85,6 +150,57 @@ describe("agent core fallback session resume", () => {
       "fifth",
     ]);
     expect(result.messages[0]?.content).toContain("omittedEntries: 2");
+  });
+
+  it("expands an old JSONL fallback tail that starts inside a tool trajectory", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mllo-fallback-tool-trajectory-"));
+    const transcriptPath = join(dir, "session.jsonl");
+    const sessionId = "session-1";
+    await writeTranscript(transcriptPath, [
+      messageEntry(sessionId, dir, "read the file"),
+      assistantToolCallEntry(sessionId, dir, "call_read"),
+      toolResultEntry(sessionId, dir, "call_read"),
+      assistantTextEntry(sessionId, dir, "done"),
+    ]);
+
+    const store = new AgentCoreJsonlSessionStore({
+      configDir: dir,
+    });
+    const handle: AgentCoreSessionHandle = {
+      sessionId,
+      cwd: dir,
+      projectDir: dir,
+      transcriptPath,
+    };
+
+    const result = await resumeAgentCoreSession({
+      store,
+      handle,
+      headEntries: 0,
+      tailEntries: 1,
+    });
+
+    expect(result.repairedToolCallIds).toEqual([]);
+    expect(result.omittedResumableEntries).toBe(0);
+    expect(result.messages.map((message) => message.role)).toEqual([
+      "user",
+      "assistant",
+      "tool",
+      "assistant",
+    ]);
+    expect(result.messages[1]).toMatchObject({
+      role: "assistant",
+      toolCalls: [
+        {
+          id: "call_read",
+        },
+      ],
+    });
+    expect(result.messages[2]).toMatchObject({
+      role: "tool",
+      toolCallId: "call_read",
+      content: "file contents",
+    });
   });
 
   it("reports zero resume consistency delta when the fallback window matches the latest checkpoint", async () => {
