@@ -126,6 +126,16 @@ export type {
   AgentCoreSessionHandle,
   AgentCoreSessionMetadata,
 } from "./session/agent-core-session-types";
+export {
+  appendAgentCoreInputHistoryEntry,
+  listAgentCoreInputHistory,
+  readAgentCoreInputHistory,
+} from "./session/agent-core-input-history";
+export type {
+  AgentCoreInputHistoryAppendArgs,
+  AgentCoreInputHistoryEntry,
+  AgentCoreInputHistoryListOptions,
+} from "./session/agent-core-input-history";
 
 export type {
   AgentCoreWorker,

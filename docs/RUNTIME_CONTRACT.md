@@ -53,6 +53,17 @@ JSONL transcript 是会话事实来源。
 - `state.sqlite` 和 side index 都是派生索引，不能替代 transcript。
 - 继续最近会话必须优先使用 `state.sqlite` 的 thread 当前态，缺失或损坏时再退回 `session_index.jsonl`，不能要求宿主应用全量扫描 transcript。
 
+### 2.1 Input History
+
+`history.jsonl` 是交互输入历史，不是会话事实来源。
+
+稳定要求：
+
+- 追加写入必须带 `sessionId`、`cwd` 和原始 `input`。
+- CLI/GUI 用于展示历史时必须反向读取、按 `cwd` 过滤，并支持当前 session 优先。
+- 交互历史 listing 必须跳过坏行；严格审计 reader 可以继续报错。
+- 大历史文件不能要求宿主应用整文件读入内存。
+
 ### 3. Runtime State
 
 `state.sqlite` 用来快速读取当前态，不是长期事实库。
