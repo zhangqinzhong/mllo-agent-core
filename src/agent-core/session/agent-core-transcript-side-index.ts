@@ -1,6 +1,10 @@
-import { appendFile, mkdir, open, readFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { AgentCoreSessionEntry, AgentCoreSessionEntryKind } from "./agent-core-session-types";
+export {
+  readAgentCoreTranscriptEntriesAtOffsets,
+  readAgentCoreTranscriptEntryAtOffset,
+} from "./agent-core-transcript-offset-reader";
 
 export type AgentCoreTranscriptSideIndexEntry = {
   kind: "transcript-index-entry";
@@ -200,32 +204,6 @@ export async function readAgentCoreTranscriptSideIndex(
     .map((line, index) => parseSideIndexLine(line, index + 1));
 }
 
-// 按 side index 的 byte offset 读取原始 transcript entry。JSONL 仍是事实来源，index 只负责定位。
-export async function readAgentCoreTranscriptEntryAtOffset(args: {
-  transcriptPath: string;
-  indexEntry: AgentCoreTranscriptSideIndexEntry;
-}): Promise<AgentCoreSessionEntry> {
-  const file = await open(args.transcriptPath, "r");
-  try {
-    const buffer = Buffer.alloc(args.indexEntry.byteLength);
-    const result = await file.read(
-      buffer,
-      0,
-      args.indexEntry.byteLength,
-      args.indexEntry.byteOffset,
-    );
-    if (result.bytesRead !== args.indexEntry.byteLength) {
-      throw new Error(
-        `Agent Core transcript entry at offset ${args.indexEntry.byteOffset} was truncated.`,
-      );
-    }
-    const line = buffer.toString("utf8").trim();
-    return parseJsonlTranscriptLine(line, args.indexEntry);
-  } finally {
-    await file.close();
-  }
-}
-
 // 找到最新 compact 记录对应的索引。没有 compact 时返回 undefined。
 export function findLatestAgentCoreCompactIndexEntry(
   indexEntries: readonly AgentCoreTranscriptSideIndexEntry[],
@@ -392,23 +370,4 @@ export function createAgentCoreTranscriptResumeIndexWindow(
     omittedResumableEntries: budgeted.omittedEntries,
     omittedResumableBytes: budgeted.omittedBytes,
   };
-}
-
-// 按 side index 元数据校验 JSONL entry。offset 指错时必须失败，避免恢复错乱历史。
-function parseJsonlTranscriptLine(
-  line: string,
-  indexEntry: AgentCoreTranscriptSideIndexEntry,
-): AgentCoreSessionEntry {
-  try {
-    const value = JSON.parse(line) as AgentCoreSessionEntry;
-    if (value.uuid !== indexEntry.entryUuid || value.kind !== indexEntry.entryKind) {
-      throw new Error("entry does not match side index metadata");
-    }
-    return value;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(
-      `Invalid Agent Core transcript entry at offset ${indexEntry.byteOffset}: ${message}`,
-    );
-  }
 }

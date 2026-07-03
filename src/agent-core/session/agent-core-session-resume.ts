@@ -3,9 +3,9 @@ import { repairAgentCoreToolResultPairing } from "../query-loop/agent-core-tool-
 import type { AgentCoreCompactRecord } from "../budget/agent-core-budget-types";
 import type { AgentCoreJsonlSessionStore } from "./agent-core-jsonl-session-store";
 import type { AgentCoreSessionEntry, AgentCoreSessionHandle } from "./agent-core-session-types";
+import { readAgentCoreTranscriptEntriesAtOffsets } from "./agent-core-transcript-offset-reader";
 import {
   createAgentCoreTranscriptResumeIndexWindow,
-  readAgentCoreTranscriptEntryAtOffset,
   readAgentCoreTranscriptSideIndex,
   type AgentCoreTranscriptSideIndexEntry,
 } from "./agent-core-transcript-side-index";
@@ -199,33 +199,6 @@ async function readFallbackResumeEntries(args: {
   };
 }
 
-async function readIndexedMessageCountCheckpoint(args: {
-  handle: AgentCoreSessionHandle;
-  indexEntries: readonly AgentCoreTranscriptSideIndexEntry[];
-}): Promise<
-  | {
-      entry: AgentCoreMessageCountCheckpointEntry;
-      checkpointAgeEntries: number;
-    }
-  | undefined
-> {
-  const checkpoint = latestMessageCountCheckpointIndexEntry(args.indexEntries);
-  if (checkpoint === undefined) {
-    return undefined;
-  }
-  const entry = await readAgentCoreTranscriptEntryAtOffset({
-    transcriptPath: args.handle.transcriptPath,
-    indexEntry: checkpoint.entry,
-  });
-  if (!isMessageCountCheckpointEntry(entry)) {
-    return undefined;
-  }
-  return {
-    entry,
-    checkpointAgeEntries: checkpoint.checkpointAgeEntries,
-  };
-}
-
 // 新 session 用 side index 精确定位 latest compact，并按预算裁剪后续 entry。
 async function readIndexedResumeEntries(
   handle: AgentCoreSessionHandle,
@@ -242,37 +215,33 @@ async function readIndexedResumeEntries(
     maxIndexedResumeEntries: options.maxIndexedResumeEntries,
     maxIndexedResumeBytes: options.maxIndexedResumeBytes,
   });
-  const [compactEntries, resumableEntries] = await Promise.all([
-    Promise.all(
-      window.compactEntries.map((entry) =>
-        readAgentCoreTranscriptEntryAtOffset({
-          transcriptPath: handle.transcriptPath,
-          indexEntry: entry,
-        }),
-      ),
-    ),
-    Promise.all(
-      window.resumableEntries.map((entry) =>
-        readAgentCoreTranscriptEntryAtOffset({
-          transcriptPath: handle.transcriptPath,
-          indexEntry: entry,
-        }),
-      ),
-    ),
-  ]);
-  const checkpoint = await readIndexedMessageCountCheckpoint({
-    handle,
-    indexEntries,
+  const checkpoint = latestMessageCountCheckpointIndexEntry(indexEntries);
+  const compactCount = window.compactEntries.length;
+  const resumableCount = window.resumableEntries.length;
+  const entries = await readAgentCoreTranscriptEntriesAtOffsets({
+    transcriptPath: handle.transcriptPath,
+    indexEntries: [
+      ...window.compactEntries,
+      ...window.resumableEntries,
+      ...(checkpoint === undefined ? [] : [checkpoint.entry]),
+    ],
   });
+  const compactEntries = entries.slice(0, compactCount);
+  const resumableEntries = entries.slice(compactCount, compactCount + resumableCount);
+  const checkpointCandidate = entries[compactCount + resumableCount];
+  const checkpointEntry =
+    checkpointCandidate !== undefined && isMessageCountCheckpointEntry(checkpointCandidate)
+      ? checkpointCandidate
+      : undefined;
   return {
     compactEntries,
     resumableEntries,
     omittedResumableEntries: window.omittedResumableEntries,
     omittedResumableBytes: window.omittedResumableBytes,
-    ...(checkpoint === undefined
+    ...(checkpointEntry === undefined
       ? {}
       : {
-          checkpointEntry: checkpoint.entry,
+          checkpointEntry,
         }),
     checkpointAgeEntries: checkpoint?.checkpointAgeEntries ?? 0,
   };

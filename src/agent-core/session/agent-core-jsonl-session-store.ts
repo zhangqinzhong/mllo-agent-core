@@ -133,7 +133,7 @@ export class AgentCoreJsonlSessionStore {
     await this.appendEntry(handle, message);
   }
 
-  // 读取完整 session transcript。第一版先做完整读取，后续再补 head/tail window reader。
+  // 读取完整 session transcript。只给审计和小测试使用，长会话恢复应走 window 或 side index。
   async readSession(handle: AgentCoreSessionHandle): Promise<AgentCoreSessionEntry[]> {
     const content = await readFile(handle.transcriptPath, "utf8");
     return parseAgentCoreSessionJsonl(content);
