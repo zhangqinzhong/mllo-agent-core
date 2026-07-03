@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { normalizeAgentCoreMessagesForWire } from "../../src/agent-core/model/agent-core-model-wire";
 import { repairAgentCoreToolResultPairing } from "../../src/agent-core/query-loop/agent-core-tool-result-pairing";
 import { runAgentCoreQueryLoop } from "../../src/agent-core/query-loop/agent-core-query-loop";
 import type {
@@ -158,5 +159,43 @@ describe("agent core tool result pairing repair", () => {
       "user",
       "assistant",
     ]);
+  });
+
+  it("normalizes out-of-order tool results before model adapter wire conversion", () => {
+    const call: AgentCoreToolCall = {
+      id: "call_wire",
+      name: "read_file",
+      input: {
+        path: "README.md",
+      },
+    };
+    const normalized = normalizeAgentCoreMessagesForWire([
+      {
+        role: "user",
+        content: "read file",
+      },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [call],
+      },
+      {
+        role: "user",
+        content: "late user message",
+      },
+      {
+        role: "tool",
+        toolCallId: "call_wire",
+        name: "read_file",
+        content: "file contents",
+      },
+    ]);
+
+    expect(messageRoles(normalized)).toEqual(["user", "assistant", "tool", "user"]);
+    expect(normalized[2]).toMatchObject({
+      role: "tool",
+      toolCallId: "call_wire",
+      content: "file contents",
+    });
   });
 });

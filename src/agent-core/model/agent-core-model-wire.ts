@@ -1,4 +1,5 @@
 import type { AgentCoreMessage } from "../query-loop/agent-core-query-types";
+import { repairAgentCoreToolResultPairing } from "../query-loop/agent-core-tool-result-pairing";
 import type {
   AgentCoreToolCall,
   AgentCoreToolDefinition,
@@ -224,34 +225,10 @@ export function stringifyAgentCoreToolCallInput(call: AgentCoreToolCall): string
 export function normalizeAgentCoreMessagesForWire(
   messages: readonly AgentCoreMessage[],
 ): AgentCoreMessage[] {
-  const normalized: AgentCoreMessage[] = [];
-  for (let index = 0; index < messages.length; index += 1) {
-    const message = messages[index];
-    normalized.push(message);
-    if (message.role !== "assistant" || (message.toolCalls?.length ?? 0) === 0) {
-      continue;
-    }
-
-    const following = messages.slice(index + 1);
-    const answered = new Set(
-      following
-        .filter((candidate) => candidate.role === "tool")
-        .map((candidate) => candidate.toolCallId),
-    );
-    for (const call of message.toolCalls ?? []) {
-      if (!answered.has(call.id)) {
-        normalized.push({
-          role: "tool",
-          toolCallId: call.id,
-          name: call.name,
-          content: "[no result: the previous turn was interrupted before this tool call completed]",
-          isError: true,
-          errorKind: "interrupted-tool-call",
-        });
-      }
-    }
-  }
-  return normalized;
+  return repairAgentCoreToolResultPairing({
+    messages,
+    reason: "[no result: the previous turn was interrupted before this tool call completed]",
+  }).messages;
 }
 
 // 生成缺失 tool call id。部分 OpenAI 兼容端点可能只按 index 流/返工具调用。
