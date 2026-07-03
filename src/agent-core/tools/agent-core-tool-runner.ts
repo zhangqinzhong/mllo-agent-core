@@ -8,6 +8,7 @@ import {
   createAgentCoreToolInputValidationResult,
   createAgentCoreToolMalformedArgumentsResult,
 } from "./agent-core-tool-input-validation";
+import { createAgentCoreUnknownToolMessage } from "./agent-core-tool-name-repair";
 
 // 根据工具名查找定义。工具数组保持顺序，便于以后按 UI 顺序展示。
 function findAgentCoreTool(
@@ -15,15 +16,6 @@ function findAgentCoreTool(
   name: string,
 ): AgentCoreToolDefinition | undefined {
   return tools.find((tool) => tool.name === name);
-}
-
-function registeredToolNames(tools: readonly AgentCoreToolDefinition[]): string {
-  return tools.length === 0
-    ? "(none)"
-    : tools
-        .map((tool) => tool.name)
-        .sort()
-        .join(", ");
 }
 
 // 把未知异常转成工具错误文本。工具错误要回灌给模型，而不是打断整个 queryLoop。
@@ -164,10 +156,10 @@ export async function runAgentCoreToolCall(args: {
   if (tool === undefined) {
     return {
       status: "not-found",
-      message: [
-        `Tool is not registered: ${args.call.name}`,
-        `Registered tools: ${registeredToolNames(args.tools)}`,
-      ].join("\n"),
+      message: createAgentCoreUnknownToolMessage({
+        requestedName: args.call.name,
+        tools: args.tools,
+      }),
     };
   }
 
