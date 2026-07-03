@@ -6,7 +6,10 @@ import type {
   AgentCoreMessage,
   AgentCoreQueryEvent,
 } from "../../src/agent-core/query-loop/agent-core-query-types";
-import type { AgentCoreToolCall } from "../../src/agent-core/tools/agent-core-tool-types";
+import type {
+  AgentCoreToolCall,
+  AgentCoreToolDefinition,
+} from "../../src/agent-core/tools/agent-core-tool-types";
 
 async function drainAgentCoreGenerator<T>(
   generator: AsyncGenerator<AgentCoreQueryEvent, T>,
@@ -197,5 +200,107 @@ describe("agent core tool result pairing repair", () => {
       toolCallId: "call_wire",
       content: "file contents",
     });
+  });
+
+  it("renames model tool ids that were already used by earlier history", async () => {
+    const reusedCall: AgentCoreToolCall = {
+      id: "call_reused",
+      name: "read_file",
+      input: {
+        path: "old.md",
+      },
+    };
+    let toolInput: unknown;
+    let streamCount = 0;
+    const tool: AgentCoreToolDefinition = {
+      name: "read_file",
+      description: "Read a file.",
+      run: async (input) => {
+        toolInput = input;
+        return {
+          content: "new file contents",
+        };
+      },
+    };
+
+    const result = await drainAgentCoreGenerator(
+      runAgentCoreQueryLoop({
+        cwd: "/tmp/project",
+        messages: [
+          {
+            role: "user",
+            content: "read old file",
+          },
+          {
+            role: "assistant",
+            content: "",
+            toolCalls: [reusedCall],
+          },
+          {
+            role: "tool",
+            toolCallId: "call_reused",
+            name: "read_file",
+            content: "old file contents",
+          },
+          {
+            role: "user",
+            content: "read another file",
+          },
+        ],
+        tools: [tool],
+        model: {
+          stream: async function* () {
+            streamCount += 1;
+            if (streamCount === 1) {
+              yield {
+                type: "tool-call",
+                call: {
+                  id: "call_reused",
+                  name: "read_file",
+                  input: {
+                    path: "new.md",
+                  },
+                },
+              };
+              yield {
+                type: "message-end",
+              };
+              return;
+            }
+            yield {
+              type: "text-delta",
+              content: "done",
+            };
+            yield {
+              type: "message-end",
+            };
+          },
+        },
+        maxTurns: 3,
+      }),
+    );
+
+    const assistantMessagesWithTools = result.messages.filter(
+      (message) => message.role === "assistant" && (message.toolCalls?.length ?? 0) > 0,
+    );
+    const toolMessages = result.messages.filter((message) => message.role === "tool");
+    const newCall = assistantMessagesWithTools.at(-1)?.toolCalls?.[0];
+
+    expect(result.status).toBe("completed");
+    expect(toolInput).toEqual({
+      path: "new.md",
+    });
+    expect(newCall).toMatchObject({
+      id: "call_reused_2",
+      idRepairStatus: {
+        status: "duplicate-id-renamed",
+        originalId: "call_reused",
+        occurrence: 2,
+      },
+    });
+    expect(toolMessages.map((message) => message.toolCallId)).toEqual([
+      "call_reused",
+      "call_reused_2",
+    ]);
   });
 });

@@ -5,9 +5,8 @@ import {
   isAgentCoreRetryableModelError,
 } from "../model/agent-core-model-error-classification";
 import {
-  createAgentCoreToolCallIdState,
+  createAgentCoreToolCallIdStateFromMessages,
   ensureAgentCoreToolCallUniqueId,
-  ensureAgentCoreToolCallsUniqueIds,
 } from "../model/agent-core-model-wire";
 import {
   createPreExecutedToolSignal,
@@ -122,6 +121,7 @@ async function readCompleteModelTurn(
             signal: args.signal,
           }),
           args.tools ?? [],
+          messages,
         ),
         preExecutedToolCalls,
       };
@@ -145,18 +145,21 @@ async function readCompleteModelTurn(
 function normalizeModelResponseToolCalls(
   response: AgentCoreModelResponse,
   tools: NonNullable<AgentCoreQueryLoopArgs["tools"]>,
+  messages: readonly AgentCoreMessage[],
 ): AgentCoreModelResponse {
+  const toolCallIdState = createAgentCoreToolCallIdStateFromMessages(messages);
   return {
     ...response,
     toolCalls:
       response.toolCalls === undefined
         ? undefined
-        : ensureAgentCoreToolCallsUniqueIds(
-            response.toolCalls.map((call) =>
+        : response.toolCalls.map((call) =>
+            ensureAgentCoreToolCallUniqueId(
               repairAgentCoreToolCallNameAlias({
                 call,
                 tools,
               }),
+              toolCallIdState,
             ),
           ),
   };
@@ -185,7 +188,7 @@ export async function* readAgentCoreModelTurn(
     const seenToolCallSignatures = new Set<string>();
     let observedModelOutput = false;
     let canPreExecuteStreamingTools = true;
-    const toolCallIdState = createAgentCoreToolCallIdState();
+    const toolCallIdState = createAgentCoreToolCallIdStateFromMessages(messages);
     try {
       for await (const event of args.model.stream({
         systemPrompt: args.systemPrompt,

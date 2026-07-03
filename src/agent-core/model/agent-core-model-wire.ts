@@ -246,6 +246,36 @@ export function createAgentCoreToolCallIdState(): AgentCoreToolCallIdState {
   };
 }
 
+function recordToolCallIdOccurrence(
+  state: AgentCoreToolCallIdState,
+  id: string,
+  count: number,
+): void {
+  state.counts.set(id, Math.max(state.counts.get(id) ?? 0, count));
+}
+
+export function createAgentCoreToolCallIdStateFromMessages(
+  messages: readonly AgentCoreMessage[],
+): AgentCoreToolCallIdState {
+  const state = createAgentCoreToolCallIdState();
+  for (const message of messages) {
+    if (message.role !== "assistant") {
+      continue;
+    }
+    for (const call of message.toolCalls ?? []) {
+      recordToolCallIdOccurrence(state, call.id, 1);
+      if (call.idRepairStatus !== undefined) {
+        recordToolCallIdOccurrence(
+          state,
+          call.idRepairStatus.originalId,
+          call.idRepairStatus.occurrence,
+        );
+      }
+    }
+  }
+  return state;
+}
+
 // 同一轮重复 tool id 会让 tool_result 归属错乱；保留首个 id，后续加稳定后缀。
 export function ensureAgentCoreToolCallUniqueId(
   call: AgentCoreToolCall,
