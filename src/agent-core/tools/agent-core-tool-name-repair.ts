@@ -1,4 +1,4 @@
-import type { AgentCoreToolDefinition } from "./agent-core-tool-types";
+import type { AgentCoreToolCall, AgentCoreToolDefinition } from "./agent-core-tool-types";
 
 const MAX_CLOSEST_TOOL_SUGGESTIONS = 3;
 
@@ -95,6 +95,32 @@ function aliasSuggestion(args: {
     (item) =>
       normalizeToolName(item.alias) === normalizedRequestedName && registered.has(item.target),
   )?.target;
+}
+
+export function repairAgentCoreToolCallNameAlias(args: {
+  call: AgentCoreToolCall;
+  tools: readonly AgentCoreToolDefinition[];
+}): AgentCoreToolCall {
+  const names = registeredToolNames(args.tools);
+  if (names.includes(args.call.name)) {
+    return args.call;
+  }
+  const alias = aliasSuggestion({
+    requestedName: args.call.name,
+    registeredNames: names,
+  });
+  if (alias === undefined) {
+    return args.call;
+  }
+  return {
+    ...args.call,
+    name: alias,
+    nameRepairStatus: {
+      status: "tool-alias-renamed",
+      originalName: args.call.nameRepairStatus?.originalName ?? args.call.name,
+      targetName: alias,
+    },
+  };
 }
 
 function closestToolSuggestions(args: {

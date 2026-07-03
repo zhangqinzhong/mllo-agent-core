@@ -31,6 +31,13 @@ function renderToolCalls(message: Extract<AgentCoreMessage, { role: "assistant" 
               `  idRepairStatus: ${call.idRepairStatus.status}`,
               `  originalToolCallId: ${call.idRepairStatus.originalId}`,
             ]),
+        ...(call.nameRepairStatus === undefined
+          ? []
+          : [
+              `  nameRepairStatus: ${call.nameRepairStatus.status}`,
+              `  originalToolName: ${call.nameRepairStatus.originalName}`,
+              `  targetToolName: ${call.nameRepairStatus.targetName}`,
+            ]),
       ].join("\n"),
     ),
   ];

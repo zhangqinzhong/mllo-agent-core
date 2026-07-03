@@ -241,4 +241,31 @@ describe("agent core streaming tool calls", () => {
     expect(transcript).toContain("inputRepairStatus: parameter-alias-renamed");
     expect(transcript).toContain("inputRepairs: file_path->path");
   });
+
+  it("keeps tool name repair metadata in compact transcript text", () => {
+    const transcript = renderAgentCoreCompactTranscript([
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [
+          {
+            id: "call_alias",
+            name: "shell_command",
+            input: {
+              command: "pwd",
+            },
+            nameRepairStatus: {
+              status: "tool-alias-renamed",
+              originalName: "shell",
+              targetName: "shell_command",
+            },
+          },
+        ],
+      },
+    ]);
+
+    expect(transcript).toContain("nameRepairStatus: tool-alias-renamed");
+    expect(transcript).toContain("originalToolName: shell");
+    expect(transcript).toContain("targetToolName: shell_command");
+  });
 });

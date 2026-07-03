@@ -71,6 +71,12 @@ export type AgentCoreToolInputRepairStatus = {
   }[];
 };
 
+export type AgentCoreToolNameRepairStatus = {
+  status: "tool-alias-renamed";
+  originalName: string;
+  targetName: string;
+};
+
 // Agent Core 暴露给模型的工具调用。id 用来把结果稳定地回灌给模型。
 export type AgentCoreToolCall = {
   id: string;
@@ -81,6 +87,8 @@ export type AgentCoreToolCall = {
   inputRepairStatus?: AgentCoreToolInputRepairStatus;
   // 兼容端点偶尔复用 tool id；运行时必须改成唯一 id，同时保留原始 id 方便审计。
   idRepairStatus?: AgentCoreToolCallIdRepairStatus;
+  // 只修复显式白名单别名；拼写近似只提示，不自动执行，避免越过权限语义。
+  nameRepairStatus?: AgentCoreToolNameRepairStatus;
 };
 
 export type AgentCoreToolProgress =

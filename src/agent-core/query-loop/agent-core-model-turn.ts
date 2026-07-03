@@ -16,6 +16,7 @@ import {
 import { isAgentCoreStreamingToolCallReadyForPreExecution } from "./agent-core-streaming-tool-call-readiness";
 import { createAgentCoreToolCallSignature } from "./agent-core-tool-call-signature";
 import { createAgentCoreRepeatedToolFailureResult } from "./agent-core-repeated-tool-failure";
+import { repairAgentCoreToolCallNameAlias } from "../tools/agent-core-tool-name-repair";
 import type { AgentCoreToolCall } from "../tools/agent-core-tool-types";
 import type {
   AgentCoreMessage,
@@ -113,13 +114,14 @@ async function readCompleteModelTurn(
   for (let attempt = 1; attempt <= MAX_MODEL_TURN_ATTEMPTS; attempt += 1) {
     try {
       return {
-        response: normalizeModelResponseToolCallIds(
+        response: normalizeModelResponseToolCalls(
           await complete({
             systemPrompt: args.systemPrompt,
             messages: messagesForModelRequest(args, messages),
             tools: args.tools ?? [],
             signal: args.signal,
           }),
+          args.tools ?? [],
         ),
         preExecutedToolCalls,
       };
@@ -140,15 +142,23 @@ async function readCompleteModelTurn(
   throw new Error("Agent Core model retry loop exhausted unexpectedly.");
 }
 
-function normalizeModelResponseToolCallIds(
+function normalizeModelResponseToolCalls(
   response: AgentCoreModelResponse,
+  tools: NonNullable<AgentCoreQueryLoopArgs["tools"]>,
 ): AgentCoreModelResponse {
   return {
     ...response,
     toolCalls:
       response.toolCalls === undefined
         ? undefined
-        : ensureAgentCoreToolCallsUniqueIds(response.toolCalls),
+        : ensureAgentCoreToolCallsUniqueIds(
+            response.toolCalls.map((call) =>
+              repairAgentCoreToolCallNameAlias({
+                call,
+                tools,
+              }),
+            ),
+          ),
   };
 }
 
@@ -195,7 +205,13 @@ export async function* readAgentCoreModelTurn(
 
         if (event.type === "tool-call") {
           observedModelOutput = true;
-          const call = ensureAgentCoreToolCallUniqueId(event.call, toolCallIdState);
+          const call = ensureAgentCoreToolCallUniqueId(
+            repairAgentCoreToolCallNameAlias({
+              call: event.call,
+              tools: args.tools ?? [],
+            }),
+            toolCallIdState,
+          );
           const signature = createAgentCoreToolCallSignature(call);
           const isDuplicateInTurn = seenToolCallSignatures.has(signature);
           seenToolCallSignatures.add(signature);
