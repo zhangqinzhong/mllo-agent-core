@@ -109,6 +109,8 @@ mllo observe --port 43110
 host apps and benchmarks a stable observability path without depending on a UI.
 `--continue` resumes the latest non-archived session for the selected `--cwd`
 using `state.sqlite` first and `session_index.jsonl` as a fallback.
+`mllo chat` preloads input history for the selected `--cwd`, with the current
+or resumed session's prompts first.
 
 `mllo observe` starts a read-only local web observer bound to `127.0.0.1` by
 default. It reads `state.sqlite`, `session_index.jsonl`, transcript JSONL files,

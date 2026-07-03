@@ -21,11 +21,19 @@ export type MlloCliInteraction = {
   close: () => void;
 };
 
-export function createMlloCliReadline(args: { stdin: Readable; stderr: Writable }): Interface {
+export function createMlloCliReadline(args: {
+  stdin: Readable;
+  stderr: Writable;
+  history?: string[];
+  historySize?: number;
+}): Interface {
   return createInterface({
     input: args.stdin,
     output: args.stderr,
     terminal: true,
+    history: args.history,
+    historySize: args.historySize,
+    removeHistoryDuplicates: true,
   });
 }
 
