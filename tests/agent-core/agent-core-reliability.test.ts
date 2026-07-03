@@ -15,6 +15,9 @@ import { readAgentCoreShellCwdState } from "../../src/agent-core/tools/shell-cwd
 import { evaluateAgentCorePathPermission } from "../../src/agent-core/permissions/workspace-path-policy";
 import { restoreAgentCoreCheckpointRecord } from "../../src/agent-core/checkpoint/agent-core-checkpoint-restore";
 import type { AgentCoreSessionEntry } from "../../src/agent-core/session/agent-core-session-types";
+import { AgentCoreJsonlSessionStore } from "../../src/agent-core/session/agent-core-jsonl-session-store";
+import { resumeAgentCoreSession } from "../../src/agent-core/session/agent-core-session-resume";
+import { getAgentCoreTranscriptSideIndexPath } from "../../src/agent-core/session/agent-core-transcript-side-index";
 import type { AgentCoreToolDefinition } from "../../src/agent-core/tools/agent-core-tool-types";
 import type { AgentCoreCheckpointRecord } from "../../src/agent-core/checkpoint/agent-core-checkpoint-store";
 
@@ -63,6 +66,83 @@ describe("agent core reliability guards", () => {
         (entry) => (entry as Extract<AgentCoreSessionEntry, { kind: "message" }>).message.content,
       ),
     ).toEqual([giantEntry.message.content, "third", "fourth"]);
+  });
+
+  it("rebuilds a corrupted transcript side index before resuming a compacted session", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mllo-resume-index-"));
+    const cwd = join(dir, "project");
+    const store = new AgentCoreJsonlSessionStore({
+      configDir: dir,
+    });
+    const handle = await store.createSession({
+      sessionId: "session-compact",
+      cwd,
+      workspaceRoots: [cwd],
+    });
+
+    await store.appendEntry(
+      handle,
+      store.createMessageEntry({
+        sessionId: handle.sessionId,
+        cwd,
+        message: {
+          role: "user",
+          content: "old pre-compact message",
+        },
+      }),
+    );
+    await store.appendEntry(
+      handle,
+      store.createCompactRecordEntry({
+        sessionId: handle.sessionId,
+        cwd,
+        record: {
+          boundary: {
+            id: "compact-1",
+            createdAt: "2026-01-01T00:00:00.000Z",
+            originalMessageCount: 2,
+            retainedMessageCount: 1,
+            summarizedMessageCount: 1,
+          },
+          summary: "Important compact summary.",
+        },
+      }),
+    );
+    await store.appendEntry(
+      handle,
+      store.createMessageEntry({
+        sessionId: handle.sessionId,
+        cwd,
+        message: {
+          role: "user",
+          content: "tail after compact",
+        },
+      }),
+    );
+    await writeFile(
+      getAgentCoreTranscriptSideIndexPath(handle.transcriptPath),
+      "{bad index\n",
+      "utf8",
+    );
+
+    const resumed = await resumeAgentCoreSession({
+      store,
+      handle,
+    });
+    const rebuiltIndex = await readFile(
+      getAgentCoreTranscriptSideIndexPath(handle.transcriptPath),
+      "utf8",
+    );
+
+    expect(resumed.compactRecords).toHaveLength(1);
+    expect(resumed.messages.map((message) => message.content)).toEqual([
+      expect.stringContaining("Important compact summary."),
+      "tail after compact",
+    ]);
+    expect(resumed.messages.map((message) => message.content).join("\n")).not.toContain(
+      "old pre-compact message",
+    );
+    expect(rebuiltIndex).toContain('"kind":"transcript-index-entry"');
   });
 
   it("dumps model responses even when the caller consumes the original body first", async () => {
