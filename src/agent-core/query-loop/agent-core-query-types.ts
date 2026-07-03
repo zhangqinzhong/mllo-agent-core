@@ -15,6 +15,7 @@ import type { AgentCoreHookDefinition, AgentCoreHookEvent } from "../hooks/agent
 import type { AgentCorePermissionDecision } from "../permissions/agent-core-permission-types";
 import type { AgentCoreModelErrorCode } from "../model/agent-core-model-error-classification";
 import type { AgentCoreMiddleware } from "../middleware/agent-core-middleware-types";
+import type { AgentCoreToolBatchSummary } from "./agent-core-tool-batch-summary";
 
 // Query loop 内部消息格式。它先保持模型无关，后续再由 adapter 转成具体模型协议格式。
 export type AgentCoreMessage =
@@ -139,6 +140,11 @@ export type AgentCoreQueryEvent =
       type: "tool-result";
       call: AgentCoreToolCall;
       result: AgentCoreToolResult;
+    }
+  | {
+      type: "tool-batch-summary";
+      turn: number;
+      summary: AgentCoreToolBatchSummary;
     }
   | {
       type: "permission-required";
