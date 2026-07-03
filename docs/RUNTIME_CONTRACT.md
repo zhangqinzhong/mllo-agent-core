@@ -87,6 +87,17 @@ JSONL transcript 是会话事实来源。
 - 不混进主 transcript。
 - observer 展示前必须脱敏常见 secret 字段。
 
+### 4.1 Project Instructions
+
+`AGENTS.md` 是项目指令文件，由 core 负责发现并注入 prompt context。
+
+稳定要求：
+
+- 对当前 `cwd`，必须从所属 workspace root 到当前目录逐层读取 `AGENTS.md`，越靠近 `cwd` 的规则越后出现。
+- 发现过程不能越过 workspace root，避免父目录规则泄漏到无关项目。
+- 额外 workspace root 不在当前 `cwd` 祖先链上时，只读取该 root 自身的 `AGENTS.md`。
+- 宿主应用不能绕过 core 自行拼接项目规则；否则 CLI、桌面端和服务端会看到不同上下文。
+
 ### 5. Permissions
 
 权限决策由 core 产生，用户交互由宿主应用完成。
