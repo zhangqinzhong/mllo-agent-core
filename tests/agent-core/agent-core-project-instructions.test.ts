@@ -9,11 +9,15 @@ import {
 import { createAgentCoreBaseTools } from "../../src/agent-core/tools/agent-core-base-tools";
 import { createAgentCoreWriteFileTool } from "../../src/agent-core/tools/agent-core-write-file-tool";
 
-async function writeInstruction(path: string, content: string): Promise<void> {
+async function writeInstruction(
+  path: string,
+  content: string,
+  filename = "AGENTS.md",
+): Promise<void> {
   await mkdir(path, {
     recursive: true,
   });
-  await writeFile(join(path, "AGENTS.md"), content, "utf8");
+  await writeFile(join(path, filename), content, "utf8");
 }
 
 describe("agent core project instructions", () => {
@@ -85,6 +89,66 @@ describe("agent core project instructions", () => {
       "primary src",
       "shared root",
     ]);
+  });
+
+  it("prefers AGENTS.override.md over AGENTS.md in the same directory", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mllo-project-instructions-override-"));
+    const root = join(dir, "repo");
+
+    await writeInstruction(root, "checked in rules");
+    await writeInstruction(root, "local override rules", "AGENTS.override.md");
+
+    const instructions = await readAgentCoreProjectInstructions({
+      cwd: root,
+      workspaceRoots: [root],
+    });
+
+    expect(instructions).toHaveLength(1);
+    expect(instructions[0]).toMatchObject({
+      source: "AGENTS.override.md",
+      path: join(root, "AGENTS.override.md"),
+      content: "local override rules",
+    });
+  });
+
+  it("caps project instruction bytes across the loaded directory chain", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mllo-project-instructions-budget-"));
+    const root = join(dir, "repo");
+    const cwd = join(root, "src");
+
+    await writeInstruction(root, "12345");
+    await writeInstruction(cwd, "abcdef");
+
+    const instructions = await readAgentCoreProjectInstructions({
+      cwd,
+      workspaceRoots: [root],
+      maxInstructionBytes: 8,
+    });
+
+    expect(instructions.map((instruction) => instruction.content)).toEqual(["12345", "abc"]);
+    expect(instructions.map((instruction) => instruction.includedBytes)).toEqual([5, 3]);
+    expect(instructions.map((instruction) => instruction.originalBytes)).toEqual([5, 6]);
+    expect(instructions.map((instruction) => instruction.truncated)).toEqual([false, true]);
+  });
+
+  it("keeps truncated instruction metadata even when the visible prefix is whitespace", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mllo-project-instructions-whitespace-budget-"));
+    const root = join(dir, "repo");
+
+    await writeInstruction(root, "\nactual rules after prefix");
+
+    const instructions = await readAgentCoreProjectInstructions({
+      cwd: root,
+      workspaceRoots: [root],
+      maxInstructionBytes: 1,
+    });
+
+    expect(instructions).toHaveLength(1);
+    expect(instructions[0]).toMatchObject({
+      content: "\n",
+      includedBytes: 1,
+      truncated: true,
+    });
   });
 
   it("finds target-path instructions that were not loaded for the current cwd", async () => {

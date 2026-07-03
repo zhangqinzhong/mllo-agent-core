@@ -16,7 +16,7 @@ function renderProjectInstructionGuardResult(args: {
     "",
     ...args.instructions.map((instruction) =>
       [
-        `<mllo_project_instruction source="${instruction.path}">`,
+        `<mllo_project_instruction source="${instruction.path}" sourceType="${instruction.source}" bytes="${instruction.includedBytes}/${instruction.originalBytes}" truncated="${instruction.truncated ? "yes" : "no"}">`,
         instruction.content.trim(),
         "</mllo_project_instruction>",
       ].join("\n"),

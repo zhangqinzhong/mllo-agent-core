@@ -1,11 +1,23 @@
 import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
+export const DEFAULT_AGENT_CORE_PROJECT_INSTRUCTION_MAX_BYTES = 64 * 1024;
+
+export type AgentCoreProjectInstructionSource = "AGENTS.override.md" | "AGENTS.md";
+
 export type AgentCoreProjectInstruction = {
-  source: "AGENTS.md";
+  source: AgentCoreProjectInstructionSource;
   path: string;
   content: string;
+  includedBytes: number;
+  originalBytes: number;
+  truncated: boolean;
 };
+
+const PROJECT_INSTRUCTION_FILENAMES: readonly AgentCoreProjectInstructionSource[] = [
+  "AGENTS.override.md",
+  "AGENTS.md",
+];
 
 // 判断 child 是否在 parent 目录内。用 path.relative 处理跨平台路径分隔符。
 function isInsideOrSameDirectory(parent: string, child: string): boolean {
@@ -61,8 +73,18 @@ function uniqueInstructionDirectories(args: {
   return directories;
 }
 
-function instructionPath(directory: string): string {
-  return join(directory, "AGENTS.md");
+function instructionPath(directory: string, source: AgentCoreProjectInstructionSource): string {
+  return join(directory, source);
+}
+
+function instructionCandidatePaths(directory: string): {
+  source: AgentCoreProjectInstructionSource;
+  path: string;
+}[] {
+  return PROJECT_INSTRUCTION_FILENAMES.map((source) => ({
+    source,
+    path: instructionPath(directory, source),
+  }));
 }
 
 function targetInstructionDirectories(args: {
@@ -91,12 +113,26 @@ function targetInstructionDirectories(args: {
   return directories;
 }
 
-async function readInstructionPath(path: string): Promise<AgentCoreProjectInstruction | undefined> {
+function maxInstructionBytes(value: number | undefined): number {
+  return Math.max(0, Math.floor(value ?? DEFAULT_AGENT_CORE_PROJECT_INSTRUCTION_MAX_BYTES));
+}
+
+async function readInstructionPath(args: {
+  source: AgentCoreProjectInstructionSource;
+  path: string;
+  maxBytes: number;
+}): Promise<AgentCoreProjectInstruction | undefined> {
   try {
+    const buffer = await readFile(args.path);
+    const originalBytes = buffer.byteLength;
+    const included = buffer.subarray(0, args.maxBytes);
     return {
-      source: "AGENTS.md",
-      path,
-      content: await readFile(path, "utf8"),
+      source: args.source,
+      path: args.path,
+      content: included.toString("utf8"),
+      includedBytes: included.byteLength,
+      originalBytes,
+      truncated: originalBytes > included.byteLength,
     };
   } catch {
     // AGENTS.md 是可选项目规则文件；不存在或不可读时不阻塞 agent run。
@@ -104,16 +140,43 @@ async function readInstructionPath(path: string): Promise<AgentCoreProjectInstru
   }
 }
 
+async function readInstructionFromDirectory(args: {
+  directory: string;
+  maxBytes: number;
+}): Promise<AgentCoreProjectInstruction | undefined> {
+  for (const candidate of instructionCandidatePaths(args.directory)) {
+    const instruction = await readInstructionPath({
+      ...candidate,
+      maxBytes: args.maxBytes,
+    });
+    if (instruction !== undefined) {
+      return !instruction.truncated && instruction.content.trim().length === 0
+        ? undefined
+        : instruction;
+    }
+  }
+  return undefined;
+}
+
 // 读取 cwd 到 workspace root 之间的 AGENTS.md。目录级规则不能越界泄漏到其他项目。
 export async function readAgentCoreProjectInstructions(args: {
   cwd: string;
   workspaceRoots: readonly string[];
+  maxInstructionBytes?: number;
 }): Promise<AgentCoreProjectInstruction[]> {
+  let remainingBytes = maxInstructionBytes(args.maxInstructionBytes);
   const instructions: AgentCoreProjectInstruction[] = [];
   for (const directory of uniqueInstructionDirectories(args)) {
-    const instruction = await readInstructionPath(instructionPath(directory));
+    if (remainingBytes <= 0) {
+      break;
+    }
+    const instruction = await readInstructionFromDirectory({
+      directory,
+      maxBytes: remainingBytes,
+    });
     if (instruction !== undefined) {
       instructions.push(instruction);
+      remainingBytes -= instruction.includedBytes;
     }
   }
   return instructions;
@@ -124,22 +187,33 @@ export async function readAgentCoreProjectInstructionsForPath(args: {
   cwd: string;
   workspaceRoots: readonly string[];
   targetPath: string;
+  maxInstructionBytes?: number;
 }): Promise<AgentCoreProjectInstruction[]> {
   const alreadyLoadedPaths = new Set(
     uniqueInstructionDirectories({
       cwd: args.cwd,
       workspaceRoots: args.workspaceRoots,
-    }).map(instructionPath),
+    }).flatMap((directory) =>
+      instructionCandidatePaths(directory).map((candidate) => candidate.path),
+    ),
   );
+  let remainingBytes = maxInstructionBytes(args.maxInstructionBytes);
   const instructions: AgentCoreProjectInstruction[] = [];
   for (const directory of targetInstructionDirectories(args)) {
-    const path = instructionPath(directory);
-    if (alreadyLoadedPaths.has(path)) {
+    if (remainingBytes <= 0) {
+      break;
+    }
+    const candidates = instructionCandidatePaths(directory);
+    if (candidates.every((candidate) => alreadyLoadedPaths.has(candidate.path))) {
       continue;
     }
-    const instruction = await readInstructionPath(path);
+    const instruction = await readInstructionFromDirectory({
+      directory,
+      maxBytes: remainingBytes,
+    });
     if (instruction !== undefined) {
       instructions.push(instruction);
+      remainingBytes -= instruction.includedBytes;
     }
   }
   return instructions;
