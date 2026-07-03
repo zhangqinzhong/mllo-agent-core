@@ -1,121 +1,123 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
-import { z } from 'zod'
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
+import { z } from "zod";
 import {
   evaluateAgentCorePathPermission,
   evaluateAgentCoreRealPathPermission,
-  resolveAgentCorePath
-} from '../permissions/workspace-path-policy'
-import { createWriteFileChangeProgress } from './agent-core-file-change-progress'
-import { detectAgentCoreStaleFileWrite } from './agent-core-file-stale-write'
-import type { AgentCoreFilesystemToolOptions } from './agent-core-filesystem-tools'
-import type { AgentCoreToolDefinition } from './agent-core-tool-types'
-import { createAgentCoreToolInputValidationResult } from './agent-core-tool-input-validation'
+  resolveAgentCorePath,
+} from "../permissions/workspace-path-policy";
+import { createWriteFileChangeProgress } from "./agent-core-file-change-progress";
+import { detectAgentCoreStaleFileWrite } from "./agent-core-file-stale-write";
+import type { AgentCoreFilesystemToolOptions } from "./agent-core-filesystem-tools";
+import type { AgentCoreToolDefinition } from "./agent-core-tool-types";
+import { createAgentCoreToolInputValidationResult } from "./agent-core-tool-input-validation";
 
 const writeFileInputSchema = z.object({
-  path: z.string().min(1).describe('Workspace-relative file path to create or overwrite.'),
-  content: z.string().describe('Full UTF-8 file content to write.'),
+  path: z.string().min(1).describe("Workspace-relative file path to create or overwrite."),
+  content: z.string().describe("Full UTF-8 file content to write."),
   createParentDirectories: z
     .boolean()
     .optional()
-    .describe('Set true when missing parent directories should be created before writing.')
-})
+    .describe("Set true when missing parent directories should be created before writing."),
+});
 
 // 读取写入前的旧内容。文件不存在用 null 表示，这样 checkpoint restore 可以删除新建文件。
 async function readExistingUtf8File(path: string): Promise<string | null> {
   try {
-    return await readFile(path, 'utf8')
+    return await readFile(path, "utf8");
   } catch (error) {
     if (
       error instanceof Error &&
-      'code' in error &&
-      (error as NodeJS.ErrnoException).code === 'ENOENT'
+      "code" in error &&
+      (error as NodeJS.ErrnoException).code === "ENOENT"
     ) {
-      return null
+      return null;
     }
-    throw error
+    throw error;
   }
 }
 
 // 整文件写入也必须产出变更摘要，避免绕过 GUI timeline 的文件审计。
 export function createAgentCoreWriteFileTool(
-  options: AgentCoreFilesystemToolOptions
+  options: AgentCoreFilesystemToolOptions,
 ): AgentCoreToolDefinition {
   return {
-    name: 'write_file',
-    description: 'Write a UTF-8 text file in the workspace.',
+    name: "write_file",
+    description: "Write a UTF-8 text file in the workspace.",
     inputSchema: writeFileInputSchema,
     evaluatePermission(input) {
-      const parsed = writeFileInputSchema.safeParse(input)
+      const parsed = writeFileInputSchema.safeParse(input);
       return parsed.success
-        ? evaluateAgentCorePathPermission(options.permissionContext, parsed.data.path, 'write')
+        ? evaluateAgentCorePathPermission(options.permissionContext, parsed.data.path, "write")
         : {
-            status: 'deny',
-            capability: 'file-write',
-            reason: 'Invalid write_file input.'
-          }
+            status: "deny",
+            capability: "file-write",
+            reason: "Invalid write_file input.",
+          };
     },
     isConcurrencySafe: () => false,
     async run(input, context) {
-      const parsed = writeFileInputSchema.safeParse(input)
+      const parsed = writeFileInputSchema.safeParse(input);
       if (!parsed.success) {
         return createAgentCoreToolInputValidationResult({
-          toolName: 'write_file',
-          error: parsed.error
-        })
+          toolName: "write_file",
+          error: parsed.error,
+          input,
+          schema: writeFileInputSchema,
+        });
       }
-      const resolvedPath = resolveAgentCorePath(options.permissionContext, parsed.data.path)
+      const resolvedPath = resolveAgentCorePath(options.permissionContext, parsed.data.path);
       const realPathDecision = await evaluateAgentCoreRealPathPermission(
         options.permissionContext,
         parsed.data.path,
-        'write',
+        "write",
         {
-          fallbackToExistingParent: true
-        }
-      )
+          fallbackToExistingParent: true,
+        },
+      );
       if (realPathDecision !== null) {
         return {
           content: realPathDecision.reason,
-          isError: true
-        }
+          isError: true,
+        };
       }
       if (parsed.data.createParentDirectories === true) {
         await mkdir(dirname(resolvedPath), {
-          recursive: true
-        })
+          recursive: true,
+        });
       }
-      const previousContent = await readExistingUtf8File(resolvedPath)
+      const previousContent = await readExistingUtf8File(resolvedPath);
       await options.onBeforeFileWrite?.({
         path: parsed.data.path,
         resolvedPath,
-        previousContent
-      })
+        previousContent,
+      });
       const staleWrite = await detectAgentCoreStaleFileWrite({
         path: parsed.data.path,
         resolvedPath,
         expectedContent: previousContent,
-        toolName: 'write_file'
-      })
+        toolName: "write_file",
+      });
       if (staleWrite !== null) {
-        return staleWrite
+        return staleWrite;
       }
-      await writeFile(resolvedPath, parsed.data.content, 'utf8')
+      await writeFile(resolvedPath, parsed.data.content, "utf8");
       await options.onAfterFileWrite?.({
         path: parsed.data.path,
         resolvedPath,
-        contentAfterWrite: parsed.data.content
-      })
+        contentAfterWrite: parsed.data.content,
+      });
       context.onProgress?.({
-        kind: 'file-change',
+        kind: "file-change",
         change: createWriteFileChangeProgress({
           path: parsed.data.path,
           content: parsed.data.content,
-          previousContent
-        })
-      })
+          previousContent,
+        }),
+      });
       return {
-        content: `Wrote ${Buffer.byteLength(parsed.data.content, 'utf8')} bytes to ${parsed.data.path}.`
-      }
-    }
-  }
+        content: `Wrote ${Buffer.byteLength(parsed.data.content, "utf8")} bytes to ${parsed.data.path}.`,
+      };
+    },
+  };
 }
