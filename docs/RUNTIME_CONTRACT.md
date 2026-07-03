@@ -109,6 +109,7 @@ JSONL transcript 是会话事实来源。
 - 仅允许白名单参数别名自动修复；修复必须写入 metadata，不能覆盖已经存在的 canonical 参数。
 - 未知工具名必须以 tool_result 形式回灌修复建议；可以建议别名或相似工具，但不能自动执行未注册名称。
 - 同一 autonomous loop 内已失败的同名同参工具调用再次出现时必须生成 repeated-failure，而不是再次执行。
+- 权限拒绝必须写成带错误分类的 tool_result；即使 run 进入 denied 终态，也不能留下未闭合的 tool call。
 - 流式预执行只允许用于工具名已确定、参数 JSON 可信、且工具声明并发安全的调用。
 - 截断 JSON 的修复可以保留为执行候选，但不能在模型 turn 完全结束前预执行。
 

@@ -148,10 +148,21 @@ async function* handleToolCompletion(args: {
   }
 
   if (execution.status === "permission-denied") {
+    const result: AgentCoreToolResult = {
+      content: execution.decision.reason,
+      isError: true,
+      errorKind: "tool-error",
+    };
+    appendToolMessage(messages, call, result);
     yield {
       type: "permission-denied",
       call,
       decision: execution.decision,
+    };
+    yield {
+      type: "tool-result",
+      call,
+      result,
     };
     return {
       status: "denied",
