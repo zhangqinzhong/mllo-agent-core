@@ -141,11 +141,13 @@ async function* appendToolResult(
   result: AgentCoreToolResult,
   resultBudget: AgentCoreToolResultTurnBudget,
   storeToolResultBlob: AgentCoreQueryLoopArgs["storeToolResultBlob"],
+  maxResultSizeChars?: number,
 ): AsyncGenerator<AgentCoreQueryEvent, void> {
   const budgetedResult = await applyAgentCoreToolResultTurnBudget({
     budget: resultBudget,
     call,
     result,
+    maxResultSizeChars,
     storeToolResultBlob,
   });
   messages.push({
@@ -307,6 +309,7 @@ async function* allowPermissionResume(
     toolResultFromExecution(execution),
     resultBudget,
     args.storeToolResultBlob,
+    execution.status === "ok" ? execution.maxResultSizeChars : undefined,
   );
 
   for await (const update of runAgentCoreToolCalls({
@@ -368,6 +371,7 @@ async function* allowPermissionResume(
       toolResultFromExecution(update.execution),
       resultBudget,
       args.storeToolResultBlob,
+      update.execution.status === "ok" ? update.execution.maxResultSizeChars : undefined,
     );
   }
   return null;

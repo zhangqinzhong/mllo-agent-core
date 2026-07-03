@@ -160,6 +160,7 @@ export type AgentCoreToolDefinition = {
   name: string;
   description: string;
   inputSchema?: ZodType;
+  // 单工具输出超过该阈值时应落盘并给模型 preview，不能在 runner 层直接丢弃原文。
   maxResultSizeChars?: number;
   availability?: AgentCoreToolAvailabilityPolicy;
   evaluatePermission?: (input: unknown) => AgentCorePermissionDecision;
@@ -173,6 +174,7 @@ export type AgentCoreToolExecutionResult =
   | {
       status: "ok";
       result: AgentCoreToolResult;
+      maxResultSizeChars?: number;
     }
   | {
       status: "permission-required";

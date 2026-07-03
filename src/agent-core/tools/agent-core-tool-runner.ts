@@ -119,27 +119,6 @@ async function runToolWithRetry(args: {
   }
 }
 
-// 对单个工具结果做大小限制。工具级 maxResultSizeChars 用来控制上下文膨胀。
-function limitToolResultSize(
-  result: AgentCoreToolResult,
-  maxResultSizeChars: number | undefined,
-): AgentCoreToolResult {
-  if (!Number.isFinite(maxResultSizeChars) || maxResultSizeChars === undefined) {
-    return result;
-  }
-  if (result.content.length <= maxResultSizeChars) {
-    return result;
-  }
-
-  return {
-    ...result,
-    content: `${result.content.slice(0, maxResultSizeChars)}\n\n[tool result truncated after ${maxResultSizeChars} chars]`,
-    outputTruncated: true,
-    outputOriginalChars: result.content.length,
-    outputMaxChars: maxResultSizeChars,
-  };
-}
-
 // 运行单个工具调用。这里集中处理权限 gate，query loop 只关心执行状态。
 export async function runAgentCoreToolCall(args: {
   call: AgentCoreToolCall;
@@ -179,24 +158,22 @@ export async function runAgentCoreToolCall(args: {
     if (args.permissionOverride === "allow") {
       return {
         status: "ok",
-        result: limitToolResultSize(
-          await runToolWithRetry({
-            tool,
-            input: args.call.input,
-            context: {
-              cwd: args.cwd,
-              permissionDecision: {
-                status: "allow",
-                capability: permissionDecision.capability,
-                reason: "Allowed by user permission decision.",
-              },
-              signal: args.signal,
-              onProgress: args.onProgress,
-              requestWorkerPermission: args.requestWorkerPermission,
+        maxResultSizeChars: tool.maxResultSizeChars,
+        result: await runToolWithRetry({
+          tool,
+          input: args.call.input,
+          context: {
+            cwd: args.cwd,
+            permissionDecision: {
+              status: "allow",
+              capability: permissionDecision.capability,
+              reason: "Allowed by user permission decision.",
             },
-          }),
-          tool.maxResultSizeChars,
-        ),
+            signal: args.signal,
+            onProgress: args.onProgress,
+            requestWorkerPermission: args.requestWorkerPermission,
+          },
+        }),
       };
     }
     return {
@@ -213,19 +190,17 @@ export async function runAgentCoreToolCall(args: {
 
   return {
     status: "ok",
-    result: limitToolResultSize(
-      await runToolWithRetry({
-        tool,
-        input: args.call.input,
-        context: {
-          cwd: args.cwd,
-          permissionDecision,
-          signal: args.signal,
-          onProgress: args.onProgress,
-          requestWorkerPermission: args.requestWorkerPermission,
-        },
-      }),
-      tool.maxResultSizeChars,
-    ),
+    maxResultSizeChars: tool.maxResultSizeChars,
+    result: await runToolWithRetry({
+      tool,
+      input: args.call.input,
+      context: {
+        cwd: args.cwd,
+        permissionDecision,
+        signal: args.signal,
+        onProgress: args.onProgress,
+        requestWorkerPermission: args.requestWorkerPermission,
+      },
+    }),
   };
 }

@@ -418,6 +418,101 @@ describe("agent core reliability guards", () => {
     );
   });
 
+  it("persists full output before applying a single tool max result threshold", async () => {
+    let streamCount = 0;
+    const storedBlobs: Array<{
+      content: string;
+      originalChars: number;
+    }> = [];
+    const fullOutput = "0123456789".repeat(20);
+    const tool: AgentCoreToolDefinition = {
+      name: "read_big",
+      description: "Return one large result.",
+      maxResultSizeChars: 12,
+      run: async () => ({
+        content: fullOutput,
+      }),
+    };
+
+    const loop = runAgentCoreQueryLoop({
+      cwd: "/tmp/project",
+      messages: [
+        {
+          role: "user",
+          content: "read big",
+        },
+      ],
+      tools: [tool],
+      model: {
+        stream: async function* () {
+          streamCount += 1;
+          if (streamCount === 1) {
+            yield {
+              type: "tool-call",
+              call: {
+                id: "call_big",
+                name: "read_big",
+                input: {},
+              },
+            };
+            yield {
+              type: "message-end",
+            };
+            return;
+          }
+          yield {
+            type: "text-delta",
+            content: "done",
+          };
+          yield {
+            type: "message-end",
+          };
+        },
+      },
+      maxTurns: 3,
+      storeToolResultBlob: async ({ content, originalChars }) => {
+        storedBlobs.push({
+          content,
+          originalChars,
+        });
+        return {
+          outputBlobPath: "threads/session/tool-results/call_big.json",
+          outputBlobBytes: Buffer.byteLength(content, "utf8"),
+        };
+      },
+    });
+
+    const result = await (async () => {
+      while (true) {
+        const item = await loop.next();
+        if (item.done === true) {
+          return item.value;
+        }
+      }
+    })();
+
+    const toolMessage = result.messages.find((message) => message.role === "tool");
+    expect(result.status).toBe("completed");
+    expect(storedBlobs).toEqual([
+      {
+        content: fullOutput,
+        originalChars: fullOutput.length,
+      },
+    ]);
+    expect(toolMessage).toMatchObject({
+      outputTruncated: true,
+      outputOriginalChars: fullOutput.length,
+      outputMaxChars: 12,
+      outputBlobPath: "threads/session/tool-results/call_big.json",
+    });
+    expect(toolMessage?.content).toContain(`<${AGENT_CORE_PERSISTED_TOOL_OUTPUT_TAG}>`);
+    expect(toolMessage?.content).toContain("toolMaxResultChars: 12");
+    expect(toolMessage?.content).toContain("Preview:\n012345678901");
+    expect(toolMessage?.content).toContain(
+      "outputBlobPath: threads/session/tool-results/call_big.json",
+    );
+  });
+
   it("stores full truncated tool result blobs under the session runtime path", async () => {
     const projectDir = await mkdtemp(join(tmpdir(), "mllo-tool-blob-"));
     const content = "full output\n".repeat(1_000);

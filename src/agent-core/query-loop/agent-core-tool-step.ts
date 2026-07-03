@@ -233,6 +233,7 @@ async function* handleToolCompletion(args: {
   const result = await applyAgentCoreToolResultTurnBudget({
     budget: args.resultBudget,
     call,
+    maxResultSizeChars: execution.status === "ok" ? execution.maxResultSizeChars : undefined,
     storeToolResultBlob: queryArgs.storeToolResultBlob,
     result: toolExecutionResultContent(call, execution),
   });

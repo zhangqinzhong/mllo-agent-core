@@ -27,18 +27,41 @@ function originalToolResultChars(result: AgentCoreToolResult): number {
   return Math.max(result.outputOriginalChars ?? result.content.length, result.content.length);
 }
 
-function aggregateBudgetNotice(args: {
+function existingToolResultBlob(
+  result: AgentCoreToolResult,
+): AgentCoreToolResultBlobReference | undefined {
+  return result.outputBlobPath === undefined || result.outputBlobBytes === undefined
+    ? undefined
+    : {
+        outputBlobPath: result.outputBlobPath,
+        outputBlobBytes: result.outputBlobBytes,
+      };
+}
+
+function budgetLabel(args: {
+  kind: "tool-result-max" | "aggregate-turn";
+  maxChars: number;
+}): string {
+  return args.kind === "tool-result-max"
+    ? `toolMaxResultChars: ${args.maxChars}`
+    : `turnBudgetChars: ${args.maxChars}`;
+}
+
+function budgetNotice(args: {
   call: AgentCoreToolCall;
+  kind: "tool-result-max" | "aggregate-turn";
   maxChars: number;
   originalChars: number;
   keptChars: number;
   blob?: AgentCoreToolResultBlobReference;
 }): string {
   return [
-    `[tool result truncated by aggregate turn budget for ${args.call.name}]`,
+    args.kind === "tool-result-max"
+      ? `[tool result persisted because it exceeded maxResultSizeChars for ${args.call.name}]`
+      : `[tool result truncated by aggregate turn budget for ${args.call.name}]`,
     `keptChars: ${args.keptChars}`,
     `originalChars: ${args.originalChars}`,
-    `turnBudgetChars: ${args.maxChars}`,
+    budgetLabel(args),
     ...(args.blob === undefined
       ? ["Run a narrower command/read/search if more output is needed."]
       : [
@@ -51,6 +74,7 @@ function aggregateBudgetNotice(args: {
 
 function persistedToolOutputContent(args: {
   call: AgentCoreToolCall;
+  kind: "tool-result-max" | "aggregate-turn";
   maxChars: number;
   originalChars: number;
   keptChars: number;
@@ -64,7 +88,7 @@ function persistedToolOutputContent(args: {
     `toolCallId: ${args.call.id}`,
     `keptChars: ${args.keptChars}`,
     `originalChars: ${args.originalChars}`,
-    `turnBudgetChars: ${args.maxChars}`,
+    budgetLabel(args),
     `outputBlobPath: ${args.blob.outputBlobPath}`,
     `outputBlobBytes: ${args.blob.outputBlobBytes}`,
     "",
@@ -74,36 +98,119 @@ function persistedToolOutputContent(args: {
   ].join("\n");
 }
 
+async function storeOrReuseToolResultBlob(args: {
+  call: AgentCoreToolCall;
+  content: string;
+  originalChars: number;
+  result: AgentCoreToolResult;
+  storeToolResultBlob?: AgentCoreToolResultBlobStore;
+}): Promise<AgentCoreToolResultBlobReference | undefined> {
+  const existing = existingToolResultBlob(args.result);
+  if (existing !== undefined) {
+    return existing;
+  }
+  return args.storeToolResultBlob === undefined
+    ? undefined
+    : await args.storeToolResultBlob({
+        call: args.call,
+        content: args.content,
+        originalChars: args.originalChars,
+      });
+}
+
+async function applySingleToolResultSizeLimit(args: {
+  call: AgentCoreToolCall;
+  result: AgentCoreToolResult;
+  maxResultSizeChars?: number;
+  storeToolResultBlob?: AgentCoreToolResultBlobStore;
+}): Promise<AgentCoreToolResult> {
+  if (
+    args.maxResultSizeChars === undefined ||
+    !Number.isFinite(args.maxResultSizeChars) ||
+    args.result.content.length <= args.maxResultSizeChars
+  ) {
+    return args.result;
+  }
+  const keptChars = Math.max(0, args.maxResultSizeChars);
+  const originalChars = originalToolResultChars(args.result);
+  const preview = args.result.content.slice(0, keptChars);
+  const blob = await storeOrReuseToolResultBlob({
+    call: args.call,
+    content: args.result.content,
+    originalChars,
+    result: args.result,
+    storeToolResultBlob: args.storeToolResultBlob,
+  });
+  const content =
+    blob === undefined
+      ? `${preview}\n\n${budgetNotice({
+          call: args.call,
+          kind: "tool-result-max",
+          maxChars: args.maxResultSizeChars,
+          originalChars,
+          keptChars,
+        })}`
+      : persistedToolOutputContent({
+          call: args.call,
+          kind: "tool-result-max",
+          maxChars: args.maxResultSizeChars,
+          originalChars,
+          keptChars,
+          preview,
+          blob,
+        });
+  return {
+    ...args.result,
+    content,
+    outputTruncated: true,
+    outputOriginalChars: originalChars,
+    outputMaxChars: keptChars,
+    ...(blob === undefined
+      ? {}
+      : {
+          outputBlobPath: blob.outputBlobPath,
+          outputBlobBytes: blob.outputBlobBytes,
+        }),
+  };
+}
+
 // 同一 assistant turn 的工具结果共享预算，避免多个“不过单工具上限”的结果合起来打爆上下文。
 export async function applyAgentCoreToolResultTurnBudget(args: {
   budget: AgentCoreToolResultTurnBudget;
   call: AgentCoreToolCall;
   result: AgentCoreToolResult;
+  maxResultSizeChars?: number;
   storeToolResultBlob?: AgentCoreToolResultBlobStore;
 }): Promise<AgentCoreToolResult> {
+  const result = await applySingleToolResultSizeLimit({
+    call: args.call,
+    result: args.result,
+    maxResultSizeChars: args.maxResultSizeChars,
+    storeToolResultBlob: args.storeToolResultBlob,
+  });
   if (!Number.isFinite(args.budget.maxChars)) {
-    args.budget.usedChars += args.result.content.length;
-    return args.result;
+    args.budget.usedChars += result.content.length;
+    return result;
   }
-  const originalChars = originalToolResultChars(args.result);
+  const originalChars = originalToolResultChars(result);
   const remainingChars = args.budget.maxChars - args.budget.usedChars;
-  if (args.result.content.length <= remainingChars) {
-    args.budget.usedChars += args.result.content.length;
-    return args.result;
+  if (result.content.length <= remainingChars) {
+    args.budget.usedChars += result.content.length;
+    return result;
   }
 
   const keptChars = Math.max(0, remainingChars);
-  const preview = args.result.content.slice(0, keptChars);
-  const blob =
-    args.storeToolResultBlob === undefined
-      ? undefined
-      : await args.storeToolResultBlob({
-          call: args.call,
-          content: args.result.content,
-          originalChars,
-        });
-  const notice = aggregateBudgetNotice({
+  const preview = result.content.slice(0, keptChars);
+  const blob = await storeOrReuseToolResultBlob({
     call: args.call,
+    content: result.content,
+    originalChars,
+    result,
+    storeToolResultBlob: args.storeToolResultBlob,
+  });
+  const notice = budgetNotice({
+    call: args.call,
+    kind: "aggregate-turn",
     maxChars: args.budget.maxChars,
     originalChars,
     keptChars,
@@ -116,6 +223,7 @@ export async function applyAgentCoreToolResultTurnBudget(args: {
         : `${preview}\n\n${notice}`
       : persistedToolOutputContent({
           call: args.call,
+          kind: "aggregate-turn",
           maxChars: args.budget.maxChars,
           originalChars,
           keptChars,
@@ -125,7 +233,7 @@ export async function applyAgentCoreToolResultTurnBudget(args: {
   args.budget.usedChars += content.length;
   args.budget.truncatedResults += 1;
   return {
-    ...args.result,
+    ...result,
     content,
     outputTruncated: true,
     outputOriginalChars: originalChars,

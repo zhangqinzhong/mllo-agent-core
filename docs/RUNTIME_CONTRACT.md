@@ -122,6 +122,7 @@ JSONL transcript 是会话事实来源。
 - schema validation feedback 必须包含校验问题、收到的参数预览和期望 schema 预览，帮助模型下一轮直接修正。
 - 仅允许白名单参数别名自动修复；修复必须写入 metadata，不能覆盖已经存在的 canonical 参数。
 - 未知工具名必须以 tool_result 形式回灌修复建议；可以建议别名或相似工具，但不能自动执行未注册名称。
+- 工具定义的 `maxResultSizeChars` 是持久化阈值，不是 runner 级硬截断；超过阈值时必须先保留完整输出，再生成模型可见 preview 和 blob 引用。
 - 同一 assistant turn 的所有 `tool_result` 必须共享总输出预算，避免多个工具结果各自不过限但合计打爆下一轮上下文。
 - 当 runtime 提供 blob store 时，被共享预算裁剪的 `tool_result` 必须保留 `outputBlobPath` 和 `outputBlobBytes`，并在模型可见正文中渲染 `<mllo_persisted_tool_output>` 块；完整输出不能静默丢失。
 - 同一 autonomous loop 内已失败的同名同参工具调用再次出现时必须生成 repeated-failure，而不是再次执行。
