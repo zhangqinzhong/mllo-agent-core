@@ -95,7 +95,19 @@ JSONL transcript 是会话事实来源。
 - worker permission request 必须走宿主应用统一审批。
 - worker adapter 不能把第三方产品语义泄漏成 core 的主协议。
 
-### 7. Runtime Home
+### 7. Tool Calls
+
+工具调用由 core 负责解析、去重、校验、执行和回灌结果。
+
+稳定要求：
+
+- tool call id 只用于配对结果；重复检测必须按工具名和 JSON 参数判断。
+- tool result 必须能和 assistant tool call 配对；compact、resume 和 rewind 类逻辑不能切断配对。
+- schema validation 和 malformed arguments 必须回灌给模型修复，不能静默执行。
+- 流式预执行只允许用于工具名已确定、参数 JSON 可信、且工具声明并发安全的调用。
+- 截断 JSON 的修复可以保留为执行候选，但不能在模型 turn 完全结束前预执行。
+
+### 8. Runtime Home
 
 core 不猜宿主应用的数据目录。宿主应用必须显式传入 runtime home 或 session config。
 

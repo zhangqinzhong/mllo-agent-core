@@ -13,6 +13,7 @@ import {
   createPreExecutedToolSignal,
   type PreExecutedToolCall,
 } from "./agent-core-pre-executed-tool-call";
+import { isAgentCoreStreamingToolCallReadyForPreExecution } from "./agent-core-streaming-tool-call-readiness";
 import { createAgentCoreToolCallSignature } from "./agent-core-tool-call-signature";
 import { createAgentCoreRepeatedToolFailureResult } from "./agent-core-repeated-tool-failure";
 import type { AgentCoreToolCall } from "../tools/agent-core-tool-types";
@@ -76,6 +77,7 @@ function maybePreExecuteStreamingToolCall(args: {
       messages: args.messages,
       call: args.call,
     }) !== undefined ||
+    !isAgentCoreStreamingToolCallReadyForPreExecution(args.call) ||
     !isAgentCoreToolCallConcurrencySafe(args.queryArgs.tools ?? [], args.call) ||
     args.preExecutedToolCalls.has(args.call.id)
   ) {
@@ -198,8 +200,10 @@ export async function* readAgentCoreModelTurn(
           const isDuplicateInTurn = seenToolCallSignatures.has(signature);
           seenToolCallSignatures.add(signature);
           toolCalls.push(call);
-          const isConcurrencySafe = isAgentCoreToolCallConcurrencySafe(args.tools ?? [], call);
-          if (!isConcurrencySafe) {
+          const isReadyForPreExecution = isAgentCoreStreamingToolCallReadyForPreExecution(call);
+          const isConcurrencySafe =
+            isReadyForPreExecution && isAgentCoreToolCallConcurrencySafe(args.tools ?? [], call);
+          if (!isReadyForPreExecution || !isConcurrencySafe) {
             canPreExecuteStreamingTools = false;
           }
           if (

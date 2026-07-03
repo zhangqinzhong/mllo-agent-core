@@ -287,4 +287,79 @@ describe("agent core reliability guards", () => {
     expect(toolWasAborted).toBe(true);
     expect(events.some((event) => event.type === "error")).toBe(true);
   });
+
+  it("does not pre-execute repaired streaming tool calls before the model turn closes", async () => {
+    let modelTurnClosed = false;
+    let toolRanBeforeModelTurnClosed = false;
+    let streamCount = 0;
+    const tool: AgentCoreToolDefinition = {
+      name: "read_snapshot",
+      description: "Read a stable snapshot.",
+      isConcurrencySafe: () => true,
+      run: async () => {
+        toolRanBeforeModelTurnClosed = !modelTurnClosed;
+        return {
+          content: "snapshot",
+        };
+      },
+    };
+
+    const loop = runAgentCoreQueryLoop({
+      cwd: "/tmp/project",
+      messages: [
+        {
+          role: "user",
+          content: "read",
+        },
+      ],
+      tools: [tool],
+      model: {
+        stream: async function* () {
+          streamCount += 1;
+          if (streamCount === 1) {
+            yield {
+              type: "tool-call",
+              call: {
+                id: "tool-1",
+                name: "read_snapshot",
+                input: {
+                  path: "file.txt",
+                },
+                inputParseStatus: {
+                  status: "repaired-truncated-json",
+                  rawPreview: '{"path":"file.txt"',
+                },
+              },
+            };
+            await Promise.resolve();
+            modelTurnClosed = true;
+            yield {
+              type: "message-end",
+            };
+            return;
+          }
+          yield {
+            type: "text-delta",
+            content: "done",
+          };
+          yield {
+            type: "message-end",
+          };
+        },
+      },
+      maxTurns: 3,
+    });
+
+    let result;
+    while (true) {
+      const item = await loop.next();
+      if (item.done === true) {
+        result = item.value;
+        break;
+      }
+    }
+
+    expect(result.status).toBe("completed");
+    expect(toolRanBeforeModelTurnClosed).toBe(false);
+  });
 });
