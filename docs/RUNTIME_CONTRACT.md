@@ -122,6 +122,7 @@ JSONL transcript 是会话事实来源。
 - schema validation feedback 必须包含校验问题、收到的参数预览和期望 schema 预览，帮助模型下一轮直接修正。
 - 仅允许白名单参数别名自动修复；修复必须写入 metadata，不能覆盖已经存在的 canonical 参数。
 - 未知工具名必须以 tool_result 形式回灌修复建议；可以建议别名或相似工具，但不能自动执行未注册名称。
+- 同一 assistant turn 的所有 `tool_result` 必须共享总输出预算，避免多个工具结果各自不过限但合计打爆下一轮上下文。
 - 同一 autonomous loop 内已失败的同名同参工具调用再次出现时必须生成 repeated-failure，而不是再次执行。
 - 权限拒绝必须写成带错误分类的 tool_result；即使 run 进入 denied 终态，也不能留下未闭合的 tool call。
 - query loop 入口和 session resume 都必须修复缺失或错位的 tool_result，不能把悬空 tool_call 发送给模型端点。

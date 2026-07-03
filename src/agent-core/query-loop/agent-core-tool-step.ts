@@ -9,6 +9,11 @@ import {
 import { runExecutableAgentCoreToolCallsStep } from "./agent-core-executable-tool-calls-step";
 import { createAgentCoreRepeatedToolFailureResult } from "./agent-core-repeated-tool-failure";
 import { createAgentCoreToolFailureFeedback } from "./agent-core-tool-failure-feedback";
+import {
+  applyAgentCoreToolResultTurnBudget,
+  createAgentCoreToolResultTurnBudget,
+  type AgentCoreToolResultTurnBudget,
+} from "./agent-core-tool-result-turn-budget";
 import type {
   AgentCoreToolCall,
   AgentCoreToolExecutionResult,
@@ -133,6 +138,7 @@ async function* handleToolCompletion(args: {
   call: AgentCoreToolCall;
   execution: AgentCoreToolExecutionResult;
   middlewareChain: AgentCoreMiddlewareChain;
+  resultBudget: AgentCoreToolResultTurnBudget;
   remainingCalls?: readonly AgentCoreToolCall[];
 }): AsyncGenerator<AgentCoreQueryEvent, AgentCoreQueryLoopResult | null> {
   const remainingCalls = args.remainingCalls ?? [];
@@ -153,11 +159,15 @@ async function* handleToolCompletion(args: {
   }
 
   if (execution.status === "permission-denied") {
-    const result: AgentCoreToolResult = {
-      content: execution.decision.reason,
-      isError: true,
-      errorKind: "permission-denied",
-    };
+    const result = applyAgentCoreToolResultTurnBudget({
+      budget: args.resultBudget,
+      call,
+      result: {
+        content: execution.decision.reason,
+        isError: true,
+        errorKind: "permission-denied",
+      },
+    });
     appendToolMessage(messages, call, result);
     yield {
       type: "permission-denied",
@@ -219,7 +229,11 @@ async function* handleToolCompletion(args: {
     };
   }
 
-  const result = toolExecutionResultContent(call, execution);
+  const result = applyAgentCoreToolResultTurnBudget({
+    budget: args.resultBudget,
+    call,
+    result: toolExecutionResultContent(call, execution),
+  });
   appendToolMessage(messages, call, result);
   await args.middlewareChain.afterTool({
     queryArgs,
@@ -246,6 +260,7 @@ export async function* runToolCallsStep(args: {
   turn: number;
 }): AsyncGenerator<AgentCoreQueryEvent, AgentCoreQueryLoopResult | null> {
   const duplicateTracker = createAgentCoreDuplicateToolCallTracker();
+  const resultBudget = createAgentCoreToolResultTurnBudget();
   const remainingCallsAfter = (call: AgentCoreToolCall): readonly AgentCoreToolCall[] => {
     const index = args.calls.findIndex((candidate) => candidate.id === call.id);
     return index >= 0 ? args.calls.slice(index + 1) : [];
@@ -261,6 +276,7 @@ export async function* runToolCallsStep(args: {
       call: input.call,
       execution: input.execution,
       middlewareChain: args.middlewareChain,
+      resultBudget,
       remainingCalls: input.remainingCalls,
     });
 
@@ -283,6 +299,7 @@ export async function* runToolCallsStep(args: {
       call,
       execution: syntheticExecution ?? (await preExecuted.execution),
       middlewareChain: args.middlewareChain,
+      resultBudget,
       remainingCalls: remainingCallsAfter(call),
     });
     if (result !== null) {
@@ -325,6 +342,7 @@ export async function* runToolCallsStep(args: {
         call,
         execution: syntheticExecution,
         middlewareChain: args.middlewareChain,
+        resultBudget,
         remainingCalls: remainingCallsAfter(call),
       });
       if (result !== null) {

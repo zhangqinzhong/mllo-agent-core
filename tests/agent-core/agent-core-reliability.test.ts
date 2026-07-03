@@ -10,6 +10,7 @@ import {
 import { readAgentCoreJsonlWindow } from "../../src/agent-core/session/agent-core-jsonl-window-reader";
 import { readLatestAgentCorePlanJournal } from "../../src/agent-core/tools/agent-core-plan-journal";
 import { runAgentCoreQueryLoop } from "../../src/agent-core/query-loop/agent-core-query-loop";
+import { AGENT_CORE_TOOL_RESULTS_PER_TURN_MAX_CHARS } from "../../src/agent-core/query-loop/agent-core-tool-result-turn-budget";
 import { readLatestAgentCoreShellTaskJournal } from "../../src/agent-core/tools/shell-task-journal";
 import { readAgentCoreShellCwdState } from "../../src/agent-core/tools/shell-cwd-state";
 import { evaluateAgentCorePathPermission } from "../../src/agent-core/permissions/workspace-path-policy";
@@ -287,6 +288,86 @@ describe("agent core reliability guards", () => {
     expect(result.status).toBe("error");
     expect(toolWasAborted).toBe(true);
     expect(events.some((event) => event.type === "error")).toBe(true);
+  });
+
+  it("caps aggregate tool result content within one assistant turn", async () => {
+    let streamCount = 0;
+    const outputByName = new Map([
+      ["first", "a".repeat(150_000)],
+      ["second", "b".repeat(90_000)],
+      ["third", "c".repeat(1_000)],
+    ]);
+    const tool: AgentCoreToolDefinition = {
+      name: "big_read",
+      description: "Return large output.",
+      run: async (input) => ({
+        content: outputByName.get((input as { name: string }).name) ?? "",
+      }),
+    };
+
+    const loop = runAgentCoreQueryLoop({
+      cwd: "/tmp/project",
+      messages: [
+        {
+          role: "user",
+          content: "read lots",
+        },
+      ],
+      tools: [tool],
+      model: {
+        stream: async function* () {
+          streamCount += 1;
+          if (streamCount === 1) {
+            for (const name of ["first", "second", "third"]) {
+              yield {
+                type: "tool-call",
+                call: {
+                  id: `call_${name}`,
+                  name: "big_read",
+                  input: {
+                    name,
+                  },
+                },
+              };
+            }
+            yield {
+              type: "message-end",
+            };
+            return;
+          }
+          yield {
+            type: "text-delta",
+            content: "done",
+          };
+          yield {
+            type: "message-end",
+          };
+        },
+      },
+      maxTurns: 3,
+    });
+
+    const result = await (async () => {
+      while (true) {
+        const item = await loop.next();
+        if (item.done === true) {
+          return item.value;
+        }
+      }
+    })();
+
+    expect(result.status).toBe("completed");
+    const toolMessages = result.messages.filter((message) => message.role === "tool");
+    expect(toolMessages).toHaveLength(3);
+    expect(toolMessages[0]?.content.length).toBe(150_000);
+    expect(toolMessages[1]?.content).toContain(
+      "[tool result truncated by aggregate turn budget for big_read]",
+    );
+    expect(toolMessages[1]?.content).toContain("keptChars: 50000");
+    expect(toolMessages[2]?.content).toContain("keptChars: 0");
+    expect(toolMessages.reduce((sum, message) => sum + message.content.length, 0)).toBeLessThan(
+      AGENT_CORE_TOOL_RESULTS_PER_TURN_MAX_CHARS + 1_000,
+    );
   });
 
   it("does not pre-execute repaired streaming tool calls before the model turn closes", async () => {

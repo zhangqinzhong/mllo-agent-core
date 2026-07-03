@@ -10,6 +10,11 @@ import type {
   AgentCoreToolExecutionResult,
   AgentCoreToolResult,
 } from "../tools/agent-core-tool-types";
+import {
+  applyAgentCoreToolResultTurnBudget,
+  createAgentCoreToolResultTurnBudget,
+  type AgentCoreToolResultTurnBudget,
+} from "./agent-core-tool-result-turn-budget";
 import type { AgentCoreHookDefinition } from "../hooks/agent-core-hook-types";
 import type {
   AgentCoreMessage,
@@ -71,6 +76,28 @@ function lastAssistantToolCalls(messages: readonly AgentCoreMessage[]): AgentCor
   return [];
 }
 
+function latestAssistantMessageIndex(messages: readonly AgentCoreMessage[]): number {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === "assistant") {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function createPermissionResumeResultBudget(
+  messages: readonly AgentCoreMessage[],
+): AgentCoreToolResultTurnBudget {
+  const budget = createAgentCoreToolResultTurnBudget();
+  const assistantIndex = latestAssistantMessageIndex(messages);
+  for (const message of messages.slice(assistantIndex + 1)) {
+    if (message.role === "tool") {
+      budget.usedChars += message.content.length;
+    }
+  }
+  return budget;
+}
+
 // 找到当前 permission call 及其后续同轮工具。前面的工具在暂停前已经完成或不应重跑。
 function callsFromPermissionPoint(
   calls: readonly AgentCoreToolCall[],
@@ -111,26 +138,40 @@ function* appendToolResult(
   messages: AgentCoreMessage[],
   call: AgentCoreToolCall,
   result: AgentCoreToolResult,
+  resultBudget: AgentCoreToolResultTurnBudget,
 ): Generator<AgentCoreQueryEvent, void> {
+  const budgetedResult = applyAgentCoreToolResultTurnBudget({
+    budget: resultBudget,
+    call,
+    result,
+  });
   messages.push({
     role: "tool",
     toolCallId: call.id,
     name: call.name,
-    content: result.content,
-    isError: result.isError,
-    ...(result.errorKind === undefined ? {} : { errorKind: result.errorKind }),
-    ...(result.outputTruncated === undefined ? {} : { outputTruncated: result.outputTruncated }),
-    ...(result.outputOriginalChars === undefined
+    content: budgetedResult.content,
+    isError: budgetedResult.isError,
+    ...(budgetedResult.errorKind === undefined ? {} : { errorKind: budgetedResult.errorKind }),
+    ...(budgetedResult.outputTruncated === undefined
       ? {}
-      : { outputOriginalChars: result.outputOriginalChars }),
-    ...(result.outputMaxChars === undefined ? {} : { outputMaxChars: result.outputMaxChars }),
-    ...(result.outputBlobPath === undefined ? {} : { outputBlobPath: result.outputBlobPath }),
-    ...(result.outputBlobBytes === undefined ? {} : { outputBlobBytes: result.outputBlobBytes }),
+      : { outputTruncated: budgetedResult.outputTruncated }),
+    ...(budgetedResult.outputOriginalChars === undefined
+      ? {}
+      : { outputOriginalChars: budgetedResult.outputOriginalChars }),
+    ...(budgetedResult.outputMaxChars === undefined
+      ? {}
+      : { outputMaxChars: budgetedResult.outputMaxChars }),
+    ...(budgetedResult.outputBlobPath === undefined
+      ? {}
+      : { outputBlobPath: budgetedResult.outputBlobPath }),
+    ...(budgetedResult.outputBlobBytes === undefined
+      ? {}
+      : { outputBlobBytes: budgetedResult.outputBlobBytes }),
   });
   yield {
     type: "tool-result",
     call,
-    result,
+    result: budgetedResult,
   };
 }
 
@@ -139,17 +180,23 @@ function* denyPermissionResume(
   messages: AgentCoreMessage[],
   calls: readonly AgentCoreToolCall[],
   decision: Extract<AgentCorePermissionResumeDecision, { status: "deny" }>,
+  resultBudget: AgentCoreToolResultTurnBudget,
 ): Generator<AgentCoreQueryEvent, void> {
   const [call, ...remainingCalls] = calls;
   if (call === undefined) {
     return;
   }
 
-  yield* appendToolResult(messages, call, {
-    content: `Permission denied by user: ${decision.reason}`,
-    isError: true,
-    errorKind: "permission-denied",
-  });
+  yield* appendToolResult(
+    messages,
+    call,
+    {
+      content: `Permission denied by user: ${decision.reason}`,
+      isError: true,
+      errorKind: "permission-denied",
+    },
+    resultBudget,
+  );
   yield* appendMissingToolResults(
     messages,
     remainingCalls,
@@ -161,6 +208,7 @@ function* appendPermissionDeniedResult(
   messages: AgentCoreMessage[],
   call: AgentCoreToolCall,
   execution: Extract<AgentCoreToolExecutionResult, { status: "permission-denied" }>,
+  resultBudget: AgentCoreToolResultTurnBudget,
 ): Generator<AgentCoreQueryEvent, void> {
   const result = toolResultFromExecution(execution);
   yield {
@@ -168,7 +216,7 @@ function* appendPermissionDeniedResult(
     call,
     decision: execution.decision,
   };
-  yield* appendToolResult(messages, call, result);
+  yield* appendToolResult(messages, call, result, resultBudget);
 }
 
 // 用户允许权限时执行当前工具，并继续处理同一 assistant turn 后续工具。
@@ -176,6 +224,7 @@ async function* allowPermissionResume(
   args: AgentCorePermissionResumeArgs,
   messages: AgentCoreMessage[],
   calls: readonly AgentCoreToolCall[],
+  resultBudget: AgentCoreToolResultTurnBudget,
 ): AsyncGenerator<AgentCoreQueryEvent, AgentCorePermissionResumePauseResult | null> {
   const [call, ...remainingCalls] = calls;
   if (call === undefined) {
@@ -231,7 +280,7 @@ async function* allowPermissionResume(
     };
   }
   if (execution.status === "permission-denied") {
-    yield* appendPermissionDeniedResult(messages, call, execution);
+    yield* appendPermissionDeniedResult(messages, call, execution, resultBudget);
     return {
       status: "denied",
       messages,
@@ -240,7 +289,7 @@ async function* allowPermissionResume(
       resumedCall: args.waitingResult.call,
     };
   }
-  yield* appendToolResult(messages, call, toolResultFromExecution(execution));
+  yield* appendToolResult(messages, call, toolResultFromExecution(execution), resultBudget);
 
   for await (const update of runAgentCoreToolCalls({
     calls: remainingCalls,
@@ -280,7 +329,7 @@ async function* allowPermissionResume(
       };
     }
     if (update.execution.status === "permission-denied") {
-      yield* appendPermissionDeniedResult(messages, update.call, update.execution);
+      yield* appendPermissionDeniedResult(messages, update.call, update.execution, resultBudget);
       return {
         status: "denied",
         messages,
@@ -289,7 +338,12 @@ async function* allowPermissionResume(
         resumedCall: args.waitingResult.call,
       };
     }
-    yield* appendToolResult(messages, update.call, toolResultFromExecution(update.execution));
+    yield* appendToolResult(
+      messages,
+      update.call,
+      toolResultFromExecution(update.execution),
+      resultBudget,
+    );
   }
   return null;
 }
@@ -300,9 +354,10 @@ export async function* resumeAgentCorePermissionDecision(
 ): AsyncGenerator<AgentCoreQueryEvent, AgentCorePermissionResumeResult> {
   const messages = [...args.waitingResult.messages];
   const calls = callsFromPermissionPoint(lastAssistantToolCalls(messages), args.waitingResult.call);
+  const resultBudget = createPermissionResumeResultBudget(messages);
 
   if (args.decision.status === "deny") {
-    yield* denyPermissionResume(messages, calls, args.decision);
+    yield* denyPermissionResume(messages, calls, args.decision, resultBudget);
     return {
       status: "resumed",
       messages,
@@ -310,7 +365,7 @@ export async function* resumeAgentCorePermissionDecision(
     };
   }
 
-  const paused = yield* allowPermissionResume(args, messages, calls);
+  const paused = yield* allowPermissionResume(args, messages, calls, resultBudget);
   if (paused !== null) {
     return paused;
   }
