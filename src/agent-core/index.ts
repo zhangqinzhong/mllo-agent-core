@@ -11,6 +11,10 @@ export type {
 export type { AgentCorePromptProfile } from "./context/agent-core-prompt-profile";
 
 export { runAgentCoreQueryLoop } from "./query-loop/agent-core-query-loop";
+export {
+  AGENT_CORE_PERSISTED_TOOL_OUTPUT_TAG,
+  AGENT_CORE_TOOL_RESULTS_PER_TURN_MAX_CHARS,
+} from "./query-loop/agent-core-tool-result-turn-budget";
 export type {
   AgentCoreMessage,
   AgentCoreModelAdapter,

@@ -64,7 +64,8 @@ function renderToolResult(call: AgentCoreToolCall, result: AgentCoreToolResult):
     return `[mllo] tool ${call.name} failed: ${previewText(result.content, 220)}`;
   }
   if (result.outputTruncated === true) {
-    return `[mllo] tool ${call.name} output truncated: ${result.outputMaxChars}/${result.outputOriginalChars} chars`;
+    const location = result.outputBlobPath === undefined ? "" : `, saved: ${result.outputBlobPath}`;
+    return `[mllo] tool ${call.name} output truncated: ${result.outputMaxChars}/${result.outputOriginalChars} chars${location}`;
   }
   return null;
 }

@@ -10,7 +10,10 @@ import {
 import { readAgentCoreJsonlWindow } from "../../src/agent-core/session/agent-core-jsonl-window-reader";
 import { readLatestAgentCorePlanJournal } from "../../src/agent-core/tools/agent-core-plan-journal";
 import { runAgentCoreQueryLoop } from "../../src/agent-core/query-loop/agent-core-query-loop";
-import { AGENT_CORE_TOOL_RESULTS_PER_TURN_MAX_CHARS } from "../../src/agent-core/query-loop/agent-core-tool-result-turn-budget";
+import {
+  AGENT_CORE_PERSISTED_TOOL_OUTPUT_TAG,
+  AGENT_CORE_TOOL_RESULTS_PER_TURN_MAX_CHARS,
+} from "../../src/agent-core/query-loop/agent-core-tool-result-turn-budget";
 import {
   readAgentCoreToolResultBlob,
   writeAgentCoreToolResultBlob,
@@ -380,11 +383,14 @@ describe("agent core reliability guards", () => {
     const toolMessages = result.messages.filter((message) => message.role === "tool");
     expect(toolMessages).toHaveLength(3);
     expect(toolMessages[0]?.content.length).toBe(150_000);
-    expect(toolMessages[1]?.content).toContain(
-      "[tool result truncated by aggregate turn budget for big_read]",
-    );
+    expect(toolMessages[1]?.content).toContain(`<${AGENT_CORE_PERSISTED_TOOL_OUTPUT_TAG}>`);
+    expect(toolMessages[1]?.content).toContain("toolCallId: call_second");
+    expect(toolMessages[1]?.content).toContain("outputBlobPath: blob/call_second.json");
     expect(toolMessages[1]?.content).toContain("keptChars: 50000");
+    expect(toolMessages[1]?.content).toContain("Preview:\n");
     expect(toolMessages[2]?.content).toContain("keptChars: 0");
+    expect(toolMessages[2]?.content).toContain("outputBlobPath: blob/call_third.json");
+    expect(toolMessages[2]?.content).toContain("(no preview retained in this message)");
     expect(toolMessages[1]).toMatchObject({
       outputTruncated: true,
       outputOriginalChars: 90_000,
