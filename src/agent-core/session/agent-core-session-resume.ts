@@ -7,6 +7,7 @@ import {
   createAgentCoreTranscriptResumeIndexWindow,
   readAgentCoreTranscriptEntryAtOffset,
   readAgentCoreTranscriptSideIndex,
+  type AgentCoreTranscriptSideIndexEntry,
 } from "./agent-core-transcript-side-index";
 
 const DEFAULT_RESUME_HEAD_ENTRIES = 1;
@@ -20,6 +21,16 @@ export type AgentCoreResumeResult = {
   compactRecords: AgentCoreCompactRecord[];
   omittedResumableEntries: number;
   omittedResumableBytes: number;
+  consistency?: AgentCoreResumeConsistency;
+};
+
+export type AgentCoreResumeConsistency = {
+  expectedMessageCount: number;
+  actualMessageCount: number;
+  delta: number;
+  checkpointAgeEntries: number;
+  checkpointUuid: string;
+  checkpointTimestamp: string;
 };
 
 type ResumeEntriesResult = {
@@ -27,6 +38,15 @@ type ResumeEntriesResult = {
   compactEntries: AgentCoreSessionEntry[];
   omittedResumableEntries: number;
   omittedResumableBytes: number;
+  checkpointEntry?: AgentCoreMessageCountCheckpointEntry;
+  checkpointAgeEntries: number;
+};
+
+type AgentCoreMessageCountCheckpointEntry = Extract<
+  AgentCoreSessionEntry,
+  { kind: "budget-event" }
+> & {
+  messageCount: number;
 };
 
 // 判断 entry 是否是可恢复进 queryLoop 的 message。timeline/hook/budget 只用于 UI 和审计。
@@ -43,6 +63,12 @@ function isCompactRecordEntry(
   return entry.kind === "compact-record";
 }
 
+function isMessageCountCheckpointEntry(
+  entry: AgentCoreSessionEntry,
+): entry is AgentCoreMessageCountCheckpointEntry {
+  return entry.kind === "budget-event" && typeof entry.messageCount === "number";
+}
+
 // 找到最新 compact record 的位置。恢复时只读它之后的 message，避免旧上下文回流。
 function latestCompactRecordIndex(entries: readonly AgentCoreSessionEntry[]): number {
   for (let index = entries.length - 1; index >= 0; index -= 1) {
@@ -51,6 +77,44 @@ function latestCompactRecordIndex(entries: readonly AgentCoreSessionEntry[]): nu
     }
   }
   return -1;
+}
+
+function latestMessageCountCheckpoint(entries: readonly AgentCoreSessionEntry[]):
+  | {
+      entry: AgentCoreMessageCountCheckpointEntry;
+      checkpointAgeEntries: number;
+    }
+  | undefined {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (entry !== undefined && isMessageCountCheckpointEntry(entry)) {
+      return {
+        entry,
+        checkpointAgeEntries: entries.length - 1 - index,
+      };
+    }
+  }
+  return undefined;
+}
+
+function latestMessageCountCheckpointIndexEntry(
+  entries: readonly AgentCoreTranscriptSideIndexEntry[],
+):
+  | {
+      entry: AgentCoreTranscriptSideIndexEntry;
+      checkpointAgeEntries: number;
+    }
+  | undefined {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (entry?.entryKind === "budget-event") {
+      return {
+        entry,
+        checkpointAgeEntries: entries.length - 1 - index,
+      };
+    }
+  }
+  return undefined;
 }
 
 // 旧 session 没有 side index 时，继续用 head/tail 窗口恢复，保持向后兼容。
@@ -66,12 +130,46 @@ async function readFallbackResumeEntries(args: {
   });
   const entries = [...window.head, ...window.tail];
   const compactIndex = latestCompactRecordIndex(entries);
+  const checkpoint = latestMessageCountCheckpoint(entries);
   return {
     resumableEntries: compactIndex >= 0 ? entries.slice(compactIndex + 1) : entries,
     compactEntries: entries.filter(isCompactRecordEntry),
     omittedResumableEntries: window.omittedEntries,
     // 旧 JSONL fallback 没有 side index，无法可靠计算被省略 entry 的字节数。
     omittedResumableBytes: 0,
+    ...(checkpoint === undefined
+      ? {}
+      : {
+          checkpointEntry: checkpoint.entry,
+        }),
+    checkpointAgeEntries: checkpoint?.checkpointAgeEntries ?? 0,
+  };
+}
+
+async function readIndexedMessageCountCheckpoint(args: {
+  handle: AgentCoreSessionHandle;
+  indexEntries: readonly AgentCoreTranscriptSideIndexEntry[];
+}): Promise<
+  | {
+      entry: AgentCoreMessageCountCheckpointEntry;
+      checkpointAgeEntries: number;
+    }
+  | undefined
+> {
+  const checkpoint = latestMessageCountCheckpointIndexEntry(args.indexEntries);
+  if (checkpoint === undefined) {
+    return undefined;
+  }
+  const entry = await readAgentCoreTranscriptEntryAtOffset({
+    transcriptPath: args.handle.transcriptPath,
+    indexEntry: checkpoint.entry,
+  });
+  if (!isMessageCountCheckpointEntry(entry)) {
+    return undefined;
+  }
+  return {
+    entry,
+    checkpointAgeEntries: checkpoint.checkpointAgeEntries,
   };
 }
 
@@ -109,11 +207,39 @@ async function readIndexedResumeEntries(
       ),
     ),
   ]);
+  const checkpoint = await readIndexedMessageCountCheckpoint({
+    handle,
+    indexEntries,
+  });
   return {
     compactEntries,
     resumableEntries,
     omittedResumableEntries: window.omittedResumableEntries,
     omittedResumableBytes: window.omittedResumableBytes,
+    ...(checkpoint === undefined
+      ? {}
+      : {
+          checkpointEntry: checkpoint.entry,
+        }),
+    checkpointAgeEntries: checkpoint?.checkpointAgeEntries ?? 0,
+  };
+}
+
+function createResumeConsistency(args: {
+  checkpointEntry?: AgentCoreMessageCountCheckpointEntry;
+  checkpointAgeEntries: number;
+  actualMessageCount: number;
+}): AgentCoreResumeConsistency | undefined {
+  if (args.checkpointEntry === undefined) {
+    return undefined;
+  }
+  return {
+    expectedMessageCount: args.checkpointEntry.messageCount,
+    actualMessageCount: args.actualMessageCount,
+    delta: args.actualMessageCount - args.checkpointEntry.messageCount,
+    checkpointAgeEntries: args.checkpointAgeEntries,
+    checkpointUuid: args.checkpointEntry.uuid,
+    checkpointTimestamp: args.checkpointEntry.timestamp,
   };
 }
 
@@ -240,8 +366,14 @@ export async function resumeAgentCoreSession(args: {
       headEntries: args.headEntries ?? DEFAULT_RESUME_HEAD_ENTRIES,
       tailEntries: args.tailEntries ?? DEFAULT_RESUME_TAIL_ENTRIES,
     }));
-  const { compactEntries, resumableEntries, omittedResumableEntries, omittedResumableBytes } =
-    indexed;
+  const {
+    compactEntries,
+    resumableEntries,
+    omittedResumableEntries,
+    omittedResumableBytes,
+    checkpointEntry,
+    checkpointAgeEntries,
+  } = indexed;
   const boundary = createResumeBoundaryMessage({
     omittedEntries: omittedResumableEntries,
     omittedBytes: omittedResumableBytes,
@@ -258,10 +390,16 @@ export async function resumeAgentCoreSession(args: {
     ...resumableMessages,
   ];
   const repaired = repairInterruptedAgentCoreMessages(messages);
+  const consistency = createResumeConsistency({
+    checkpointEntry,
+    checkpointAgeEntries,
+    actualMessageCount: repaired.messages.length,
+  });
   return {
     ...repaired,
     compactRecords,
     omittedResumableEntries,
     omittedResumableBytes,
+    ...(consistency === undefined ? {} : { consistency }),
   };
 }

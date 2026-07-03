@@ -52,6 +52,7 @@ JSONL transcript 是会话事实来源。
 - 新增 `kind` 时必须保证旧 reader 能跳过或保留未知 entry。
 - `state.sqlite` 和 side index 都是派生索引，不能替代 transcript。
 - 继续最近会话必须优先使用 `state.sqlite` 的 thread 当前态，缺失或损坏时再退回 `session_index.jsonl`，不能要求宿主应用全量扫描 transcript。
+- 每次追加新的 query loop message 后，必须追加带 `messageCount` 的 `budget-event` 检查点；resume 必须暴露最新检查点和实际恢复 message 数的差异，方便发现裁剪、compact 或中断导致的上下文漂移。
 
 ### 2.1 Input History
 
