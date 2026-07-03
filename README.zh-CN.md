@@ -83,10 +83,13 @@ node dist/src/cli/mllo-cli.js observe
 ```sh
 mllo config path
 mllo run "检查 package.json" --output-format stream-json
+mllo run --continue "继续上一个任务"
 mllo observe --port 43110
 ```
 
 `text` 给人看，`json` 输出最终 run envelope，`stream-json` 每行输出一个事件，最后再输出最终 envelope。GUI 和 benchmark 可以用这个事件流做可观测性，不需要依赖桌面界面。
+`--continue` 会恢复所选 `--cwd` 下最近的未归档会话，优先读
+`state.sqlite`，缺失时退回 `session_index.jsonl`。
 
 `mllo observe` 会启动一个只读本地 Web Observer，默认绑定
 `127.0.0.1`。它读取 `state.sqlite`、`session_index.jsonl`、transcript

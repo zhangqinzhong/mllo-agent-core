@@ -1,11 +1,16 @@
-export { runAgentCoreController } from './runtime/agent-core-run-controller'
+export { runAgentCoreController } from "./runtime/agent-core-run-controller";
+export { resolveLatestAgentCoreSession } from "./runtime/agent-core-latest-session";
+export type {
+  AgentCoreLatestSession,
+  ResolveLatestAgentCoreSessionOptions,
+} from "./runtime/agent-core-latest-session";
 export type {
   AgentCoreRunControllerOptions,
-  AgentCoreRunControllerResult
-} from './runtime/agent-core-run-controller-types'
-export type { AgentCorePromptProfile } from './context/agent-core-prompt-profile'
+  AgentCoreRunControllerResult,
+} from "./runtime/agent-core-run-controller-types";
+export type { AgentCorePromptProfile } from "./context/agent-core-prompt-profile";
 
-export { runAgentCoreQueryLoop } from './query-loop/agent-core-query-loop'
+export { runAgentCoreQueryLoop } from "./query-loop/agent-core-query-loop";
 export type {
   AgentCoreMessage,
   AgentCoreModelAdapter,
@@ -14,34 +19,34 @@ export type {
   AgentCoreModelStreamEvent,
   AgentCoreQueryEvent,
   AgentCoreQueryLoopArgs,
-  AgentCoreQueryLoopResult
-} from './query-loop/agent-core-query-types'
-export { createAgentCoreMiddlewareChain } from './middleware/agent-core-middleware-chain'
+  AgentCoreQueryLoopResult,
+} from "./query-loop/agent-core-query-types";
+export { createAgentCoreMiddlewareChain } from "./middleware/agent-core-middleware-chain";
 export type {
   AgentCoreMiddleware,
   AgentCoreMiddlewareContext,
   AgentCoreMiddlewareModelContext,
-  AgentCoreMiddlewareToolContext
-} from './middleware/agent-core-middleware-types'
+  AgentCoreMiddlewareToolContext,
+} from "./middleware/agent-core-middleware-types";
 
-export { createAgentCoreBaseTools } from './tools/agent-core-base-tools'
+export { createAgentCoreBaseTools } from "./tools/agent-core-base-tools";
 export {
   checkAgentCoreShellExecutionBackendAvailability,
   createAgentCoreShellExecutionBackendToolAvailability,
   describeAgentCoreShellExecutionBackend,
-  localAgentCoreShellExecutionBackend
-} from './tools/shell-execution-backend'
+  localAgentCoreShellExecutionBackend,
+} from "./tools/shell-execution-backend";
 export {
   buildAgentCoreSshShellCommandArgs,
-  createAgentCoreSshShellExecutionBackend
-} from './tools/ssh-shell-execution-backend'
-export type { AgentCoreSshShellExecutionBackendOptions } from './tools/ssh-shell-execution-backend'
+  createAgentCoreSshShellExecutionBackend,
+} from "./tools/ssh-shell-execution-backend";
+export type { AgentCoreSshShellExecutionBackendOptions } from "./tools/ssh-shell-execution-backend";
 export type {
   AgentCoreShellCwdTrackingMode,
   AgentCoreShellExecutionBackend,
   AgentCoreShellExecutionProcess,
-  AgentCoreShellExecutionSpawnArgs
-} from './tools/shell-execution-backend'
+  AgentCoreShellExecutionSpawnArgs,
+} from "./tools/shell-execution-backend";
 export type {
   AgentCoreToolCall,
   AgentCoreToolDefinition,
@@ -49,8 +54,8 @@ export type {
   AgentCoreToolExecutionResult,
   AgentCoreToolInputParseStatus,
   AgentCoreToolProgress,
-  AgentCoreToolResult
-} from './tools/agent-core-tool-types'
+  AgentCoreToolResult,
+} from "./tools/agent-core-tool-types";
 
 export type {
   AgentCoreHookContext,
@@ -59,10 +64,10 @@ export type {
   AgentCoreHookEvent,
   AgentCoreHookPhase,
   AgentCoreHookRunResult,
-  AgentCoreHookStatus
-} from './hooks/agent-core-hook-types'
-export { createMlloConfiguredHooks } from './hooks/agent-core-configured-hooks'
-export { computeMlloCommandHookTrustedHash } from './hooks/agent-core-command-hook-trust'
+  AgentCoreHookStatus,
+} from "./hooks/agent-core-hook-types";
+export { createMlloConfiguredHooks } from "./hooks/agent-core-configured-hooks";
+export { computeMlloCommandHookTrustedHash } from "./hooks/agent-core-command-hook-trust";
 
 export {
   approveMlloCommandHookTrustedHash,
@@ -72,55 +77,55 @@ export {
   loadDefaultMlloModelProvider,
   readMlloAgentCoreConfig,
   saveMlloCommandHookConfig,
-  writeMlloAgentCoreConfig
-} from './model/agent-core-mllo-config'
+  writeMlloAgentCoreConfig,
+} from "./model/agent-core-mllo-config";
 export type {
   MlloAgentCoreConfig,
-  MlloCommandHookApprovalResult
-} from './model/agent-core-mllo-config'
+  MlloCommandHookApprovalResult,
+} from "./model/agent-core-mllo-config";
 
-export { createAgentCoreHttpModelAdapter } from './model/agent-core-http-model-adapter'
-export type { AgentCoreHttpModelConfig } from './model/agent-core-http-model-config'
+export { createAgentCoreHttpModelAdapter } from "./model/agent-core-http-model-adapter";
+export type { AgentCoreHttpModelConfig } from "./model/agent-core-http-model-config";
 
 export type {
   AgentCoreMcpClient,
   AgentCoreMcpToolCallRequest,
   AgentCoreMcpToolCallResult,
-  AgentCoreMcpToolDescriptor
-} from './mcp/agent-core-mcp-client-types'
+  AgentCoreMcpToolDescriptor,
+} from "./mcp/agent-core-mcp-client-types";
 export {
   AgentCoreStdioMcpClient,
-  createAgentCoreStdioMcpClient
-} from './mcp/agent-core-stdio-mcp-client'
-export type { AgentCoreStdioMcpClientOptions } from './mcp/agent-core-stdio-mcp-client'
+  createAgentCoreStdioMcpClient,
+} from "./mcp/agent-core-stdio-mcp-client";
+export type { AgentCoreStdioMcpClientOptions } from "./mcp/agent-core-stdio-mcp-client";
 export {
   AgentCoreHttpMcpClient,
-  createAgentCoreHttpMcpClient
-} from './mcp/agent-core-http-mcp-client'
+  createAgentCoreHttpMcpClient,
+} from "./mcp/agent-core-http-mcp-client";
 export type {
   AgentCoreHttpMcpClientOptions,
-  AgentCoreHttpMcpTransportKind
-} from './mcp/agent-core-http-mcp-client'
-export { readAgentCoreMcpClientsFromConfig } from './mcp/agent-core-mcp-config-clients'
-export type { AgentCoreMcpConfigClientOptions } from './mcp/agent-core-mcp-config-clients'
+  AgentCoreHttpMcpTransportKind,
+} from "./mcp/agent-core-http-mcp-client";
+export { readAgentCoreMcpClientsFromConfig } from "./mcp/agent-core-mcp-config-clients";
+export type { AgentCoreMcpConfigClientOptions } from "./mcp/agent-core-mcp-config-clients";
 
 export type {
   AgentCoreSkillReadResult,
-  AgentCoreSkillSummary
-} from './skills/agent-core-skill-discovery'
+  AgentCoreSkillSummary,
+} from "./skills/agent-core-skill-discovery";
 
 export type {
   AgentCoreCapability,
   AgentCorePermissionDecision,
-  AgentCorePermissionMode
-} from './permissions/agent-core-permission-types'
+  AgentCorePermissionMode,
+} from "./permissions/agent-core-permission-types";
 
 export type {
   AgentCoreSessionEntry,
   AgentCoreSessionEntryKind,
   AgentCoreSessionHandle,
-  AgentCoreSessionMetadata
-} from './session/agent-core-session-types'
+  AgentCoreSessionMetadata,
+} from "./session/agent-core-session-types";
 
 export type {
   AgentCoreWorker,
@@ -129,16 +134,16 @@ export type {
   AgentCoreWorkerPermissionDecision,
   AgentCoreWorkerPermissionRequest,
   AgentCoreWorkerRequest,
-  AgentCoreWorkerResult
-} from './workers/agent-core-worker-types'
+  AgentCoreWorkerResult,
+} from "./workers/agent-core-worker-types";
 export {
   AGENT_CORE_WORKER_TOOL_RESULT_MAX_CHARS,
   limitAgentCoreWorkerEventOutput,
   limitAgentCoreWorkerToolResultOutput,
-  serializeAgentCoreWorkerToolResultOutput
-} from './workers/agent-core-worker-tool-result-budget'
+  serializeAgentCoreWorkerToolResultOutput,
+} from "./workers/agent-core-worker-tool-result-budget";
 export {
   readAgentCoreWorkerToolResultBlob,
-  writeAgentCoreWorkerToolResultBlob
-} from './workers/agent-core-worker-tool-result-blob-store'
-export type { AgentCoreWorkerToolResultBlob } from './workers/agent-core-worker-tool-result-blob-store'
+  writeAgentCoreWorkerToolResultBlob,
+} from "./workers/agent-core-worker-tool-result-blob-store";
+export type { AgentCoreWorkerToolResultBlob } from "./workers/agent-core-worker-tool-result-blob-store";

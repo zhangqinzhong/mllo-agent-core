@@ -32,7 +32,7 @@ Options:
       --resume <id>                   Resume a known session id from transcript.
       --host <host>                   Observer host. Defaults to 127.0.0.1.
       --port <port>                   Observer port. Defaults to 43110.
-  -c, --continue                      Reserved for latest-session resume.
+  -c, --continue                      Resume the latest session for --cwd.
   -h, --help                          Show help.
   -v, --version                       Show version.
 

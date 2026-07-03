@@ -4,6 +4,7 @@ import type {
   AgentCoreRunControllerResult,
 } from "../agent-core/runtime/agent-core-run-controller-types";
 import { runAgentCoreController } from "../agent-core/runtime/agent-core-run-controller";
+import { resolveLatestAgentCoreSession } from "../agent-core/runtime/agent-core-latest-session";
 import { getMlloRuntimeHomeLayout } from "../agent-core/runtime-home/mllo-home-paths";
 import type { AgentCoreQueryEvent } from "../agent-core/query-loop/agent-core-query-types";
 import type { MlloCliParsedArgs } from "./mllo-cli-types";
@@ -17,22 +18,56 @@ export type MlloCliEventSink = {
   handleEvent: (event: AgentCoreQueryEvent) => void;
 };
 
-export function createMlloCliRunOptions(args: {
+async function resolveMlloCliSession(args: {
+  parsed: MlloCliParsedArgs;
+  configDir: string;
+  stateDbPath: string;
+  cwd: string;
+}): Promise<{
+  sessionId?: string;
+  resume: boolean;
+}> {
+  const explicitSessionId = args.parsed.resumeSessionId ?? args.parsed.sessionId;
+  if (args.parsed.continueLatest) {
+    if (explicitSessionId !== undefined) {
+      throw new Error("mllo --continue cannot be combined with --session-id or --resume.");
+    }
+    const latest = await resolveLatestAgentCoreSession({
+      configDir: args.configDir,
+      stateDbPath: args.stateDbPath,
+      cwd: args.cwd,
+    });
+    if (latest === undefined) {
+      throw new Error(`No mllo session found for --continue in cwd: ${args.cwd}`);
+    }
+    return {
+      sessionId: latest.sessionId,
+      resume: true,
+    };
+  }
+  return {
+    ...(explicitSessionId === undefined ? {} : { sessionId: explicitSessionId }),
+    resume: args.parsed.resumeSessionId !== undefined,
+  };
+}
+
+export async function createMlloCliRunOptions(args: {
   parsed: MlloCliParsedArgs;
   input: string;
   handlers: MlloCliRunHandlers;
   signal?: AbortSignal;
-}): AgentCoreRunControllerOptions {
+}): Promise<AgentCoreRunControllerOptions> {
   if (args.parsed.inputFormat !== "text") {
     throw new Error("mllo CLI currently supports only --input-format text.");
   }
-  if (args.parsed.continueLatest) {
-    throw new Error("mllo --continue is reserved until latest-session indexing is exposed.");
-  }
   const layout = getMlloRuntimeHomeLayout({ homePath: args.parsed.homePath });
   const cwd = resolve(args.parsed.cwd);
-  const resume = args.parsed.resumeSessionId !== undefined;
-  const sessionId = args.parsed.resumeSessionId ?? args.parsed.sessionId;
+  const sessionResolution = await resolveMlloCliSession({
+    parsed: args.parsed,
+    configDir: layout.homePath,
+    stateDbPath: layout.stateDbPath,
+    cwd,
+  });
 
   return {
     cwd,
@@ -43,8 +78,10 @@ export function createMlloCliRunOptions(args: {
     session: {
       configDir: layout.homePath,
       stateDbPath: layout.stateDbPath,
-      ...(sessionId === undefined ? {} : { sessionId }),
-      ...(resume ? { resume: true } : {}),
+      ...(sessionResolution.sessionId === undefined
+        ? {}
+        : { sessionId: sessionResolution.sessionId }),
+      ...(sessionResolution.resume ? { resume: true } : {}),
     },
     skillHomeDir: layout.skillsDir,
     ...(args.parsed.providerName === undefined ? {} : { providerName: args.parsed.providerName }),

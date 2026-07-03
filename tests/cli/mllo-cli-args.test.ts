@@ -30,6 +30,13 @@ describe("parseMlloCliArgs", () => {
     expect(parsed.observerPort).toBe(43111);
   });
 
+  it("parses latest-session resume", () => {
+    const parsed = parseMlloCliArgs(["run", "--continue", "hello"]);
+
+    expect(parsed.continueLatest).toBe(true);
+    expect(parsed.promptParts).toEqual(["hello"]);
+  });
+
   it("parses runtime options", () => {
     const parsed = parseMlloCliArgs([
       "run",

@@ -19,6 +19,7 @@ function nextChatTurnArgs(
     ...parsed,
     command: "chat",
     promptParts: [],
+    continueLatest: sessionId === undefined ? parsed.continueLatest : false,
     ...(sessionId === undefined
       ? {}
       : {
@@ -64,7 +65,7 @@ export async function runMlloCliChat(args: {
         stderr: args.io.stderr,
       });
       const result = await consumeMlloCliAgentRun({
-        options: createMlloCliRunOptions({
+        options: await createMlloCliRunOptions({
           parsed: nextChatTurnArgs(args.parsed, sessionId),
           input,
           handlers: interaction.handlers,

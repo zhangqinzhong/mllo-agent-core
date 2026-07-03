@@ -51,6 +51,7 @@ JSONL transcript 是会话事实来源。
 - entry 必须带 `kind`、`uuid`、`timestamp`、`sessionId`、`cwd`。
 - 新增 `kind` 时必须保证旧 reader 能跳过或保留未知 entry。
 - `state.sqlite` 和 side index 都是派生索引，不能替代 transcript。
+- 继续最近会话必须优先使用 `state.sqlite` 的 thread 当前态，缺失或损坏时再退回 `session_index.jsonl`，不能要求宿主应用全量扫描 transcript。
 
 ### 3. Runtime State
 

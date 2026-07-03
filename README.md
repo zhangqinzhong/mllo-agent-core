@@ -100,12 +100,15 @@ When installed or linked as a package, the binary name is `mllo`:
 ```sh
 mllo config path
 mllo run "inspect package.json" --output-format stream-json
+mllo run --continue "continue the previous task"
 mllo observe --port 43110
 ```
 
 `text` output is for humans, `json` emits one final run envelope, and
 `stream-json` emits one JSON event per line plus the final envelope. This gives
 host apps and benchmarks a stable observability path without depending on a UI.
+`--continue` resumes the latest non-archived session for the selected `--cwd`
+using `state.sqlite` first and `session_index.jsonl` as a fallback.
 
 `mllo observe` starts a read-only local web observer bound to `127.0.0.1` by
 default. It reads `state.sqlite`, `session_index.jsonl`, transcript JSONL files,
