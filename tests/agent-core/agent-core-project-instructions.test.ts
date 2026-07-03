@@ -1,8 +1,13 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { readAgentCoreProjectInstructions } from "../../src/agent-core/context/agent-core-project-instructions";
+import {
+  readAgentCoreProjectInstructions,
+  readAgentCoreProjectInstructionsForPath,
+} from "../../src/agent-core/context/agent-core-project-instructions";
+import { createAgentCoreBaseTools } from "../../src/agent-core/tools/agent-core-base-tools";
+import { createAgentCoreWriteFileTool } from "../../src/agent-core/tools/agent-core-write-file-tool";
 
 async function writeInstruction(path: string, content: string): Promise<void> {
   await mkdir(path, {
@@ -80,5 +85,119 @@ describe("agent core project instructions", () => {
       "primary src",
       "shared root",
     ]);
+  });
+
+  it("finds target-path instructions that were not loaded for the current cwd", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mllo-project-instructions-target-"));
+    const root = join(dir, "repo");
+    const cwd = join(root, "src");
+    const targetDir = join(cwd, "feature");
+
+    await writeInstruction(root, "root rules");
+    await writeInstruction(cwd, "src rules");
+    await writeInstruction(targetDir, "feature rules");
+
+    const instructions = await readAgentCoreProjectInstructionsForPath({
+      cwd,
+      workspaceRoots: [root],
+      targetPath: join(targetDir, "component.ts"),
+    });
+
+    expect(instructions.map((instruction) => instruction.content)).toEqual(["feature rules"]);
+  });
+
+  it("prevents write_file once when target-path instructions were not surfaced yet", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mllo-project-instructions-write-"));
+    const root = join(dir, "repo");
+    const cwd = join(root, "src");
+    const targetDir = join(cwd, "feature");
+    const targetPath = join(targetDir, "component.ts");
+
+    await writeInstruction(targetDir, "Use exact exports in this folder.");
+    const tool = createAgentCoreWriteFileTool({
+      permissionContext: {
+        mode: "workspace-write",
+        cwd,
+        workspaceRoots: [root],
+      },
+    });
+
+    const first = await tool.run(
+      {
+        path: "feature/component.ts",
+        content: "export const value = 1;\n",
+      },
+      {
+        cwd,
+      },
+    );
+    expect(first).toMatchObject({
+      isError: true,
+      errorKind: "project-instructions-required",
+    });
+    expect(first.content).toContain("Use exact exports in this folder.");
+    await expect(readFile(targetPath, "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+
+    const second = await tool.run(
+      {
+        path: "feature/component.ts",
+        content: "export const value = 1;\n",
+      },
+      {
+        cwd,
+      },
+    );
+    expect(second.isError).toBeUndefined();
+    await expect(readFile(targetPath, "utf8")).resolves.toBe("export const value = 1;\n");
+  });
+
+  it("shares surfaced target-path instructions across base write tools in one run", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mllo-project-instructions-shared-guard-"));
+    const root = join(dir, "repo");
+    const cwd = join(root, "src");
+    const targetDir = join(cwd, "feature");
+    const existingFile = join(targetDir, "existing.ts");
+
+    await writeInstruction(targetDir, "Feature files must use named exports.");
+    await writeFile(existingFile, "export const oldValue = 1;\n", "utf8");
+    const tools = createAgentCoreBaseTools({
+      permissionContext: {
+        mode: "workspace-write",
+        cwd,
+        workspaceRoots: [root],
+      },
+    });
+    const writeTool = tools.find((tool) => tool.name === "write_file");
+    const editTool = tools.find((tool) => tool.name === "edit_file");
+    if (writeTool === undefined || editTool === undefined) {
+      throw new Error("base file tools are missing");
+    }
+
+    const first = await writeTool.run(
+      {
+        path: "feature/new.ts",
+        content: "export const newValue = 1;\n",
+      },
+      {
+        cwd,
+      },
+    );
+    expect(first.errorKind).toBe("project-instructions-required");
+
+    const second = await editTool.run(
+      {
+        path: "feature/existing.ts",
+        oldText: "oldValue",
+        newText: "renamedValue",
+      },
+      {
+        cwd,
+      },
+    );
+
+    expect(second.isError).toBeUndefined();
+    await expect(readFile(existingFile, "utf8")).resolves.toBe("export const renamedValue = 1;\n");
   });
 });

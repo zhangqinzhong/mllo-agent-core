@@ -61,6 +61,49 @@ function uniqueInstructionDirectories(args: {
   return directories;
 }
 
+function instructionPath(directory: string): string {
+  return join(directory, "AGENTS.md");
+}
+
+function targetInstructionDirectories(args: {
+  targetPath: string;
+  workspaceRoots: readonly string[];
+}): string[] {
+  const targetDir = dirname(resolve(args.targetPath));
+  const seen = new Set<string>();
+  const directories: string[] = [];
+  for (const workspaceRoot of args.workspaceRoots) {
+    const root = resolve(workspaceRoot);
+    if (!isInsideOrSameDirectory(root, targetDir)) {
+      continue;
+    }
+    for (const directory of collectInstructionDirectories({
+      workspaceRoot: root,
+      cwd: targetDir,
+    })) {
+      if (seen.has(directory)) {
+        continue;
+      }
+      seen.add(directory);
+      directories.push(directory);
+    }
+  }
+  return directories;
+}
+
+async function readInstructionPath(path: string): Promise<AgentCoreProjectInstruction | undefined> {
+  try {
+    return {
+      source: "AGENTS.md",
+      path,
+      content: await readFile(path, "utf8"),
+    };
+  } catch {
+    // AGENTS.md 是可选项目规则文件；不存在或不可读时不阻塞 agent run。
+    return undefined;
+  }
+}
+
 // 读取 cwd 到 workspace root 之间的 AGENTS.md。目录级规则不能越界泄漏到其他项目。
 export async function readAgentCoreProjectInstructions(args: {
   cwd: string;
@@ -68,15 +111,35 @@ export async function readAgentCoreProjectInstructions(args: {
 }): Promise<AgentCoreProjectInstruction[]> {
   const instructions: AgentCoreProjectInstruction[] = [];
   for (const directory of uniqueInstructionDirectories(args)) {
-    const path = join(directory, "AGENTS.md");
-    try {
-      instructions.push({
-        source: "AGENTS.md",
-        path,
-        content: await readFile(path, "utf8"),
-      });
-    } catch {
-      // AGENTS.md 是可选项目规则文件；不存在或不可读时不阻塞 agent run。
+    const instruction = await readInstructionPath(instructionPath(directory));
+    if (instruction !== undefined) {
+      instructions.push(instruction);
+    }
+  }
+  return instructions;
+}
+
+// 读取目标文件路径额外适用的 AGENTS.md。写文件前用它发现 cwd 之外或更深目录的规则。
+export async function readAgentCoreProjectInstructionsForPath(args: {
+  cwd: string;
+  workspaceRoots: readonly string[];
+  targetPath: string;
+}): Promise<AgentCoreProjectInstruction[]> {
+  const alreadyLoadedPaths = new Set(
+    uniqueInstructionDirectories({
+      cwd: args.cwd,
+      workspaceRoots: args.workspaceRoots,
+    }).map(instructionPath),
+  );
+  const instructions: AgentCoreProjectInstruction[] = [];
+  for (const directory of targetInstructionDirectories(args)) {
+    const path = instructionPath(directory);
+    if (alreadyLoadedPaths.has(path)) {
+      continue;
+    }
+    const instruction = await readInstructionPath(path);
+    if (instruction !== undefined) {
+      instructions.push(instruction);
     }
   }
   return instructions;

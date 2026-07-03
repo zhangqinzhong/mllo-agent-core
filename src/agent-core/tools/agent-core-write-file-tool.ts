@@ -9,6 +9,7 @@ import {
 import { createWriteFileChangeProgress } from "./agent-core-file-change-progress";
 import { detectAgentCoreStaleFileWrite } from "./agent-core-file-stale-write";
 import type { AgentCoreFilesystemToolOptions } from "./agent-core-filesystem-tools";
+import { createAgentCoreProjectInstructionWriteGuard } from "./agent-core-project-instruction-write-guard";
 import type { AgentCoreToolDefinition } from "./agent-core-tool-types";
 import { createAgentCoreToolInputValidationResult } from "./agent-core-tool-input-validation";
 
@@ -41,6 +42,9 @@ async function readExistingUtf8File(path: string): Promise<string | null> {
 export function createAgentCoreWriteFileTool(
   options: AgentCoreFilesystemToolOptions,
 ): AgentCoreToolDefinition {
+  const projectInstructionWriteGuard =
+    options.projectInstructionWriteGuard ??
+    createAgentCoreProjectInstructionWriteGuard(options.permissionContext);
   return {
     name: "write_file",
     description: "Write a UTF-8 text file in the workspace.",
@@ -80,6 +84,10 @@ export function createAgentCoreWriteFileTool(
           content: realPathDecision.reason,
           isError: true,
         };
+      }
+      const instructionGuardResult = await projectInstructionWriteGuard.checkTarget(resolvedPath);
+      if (instructionGuardResult !== undefined) {
+        return instructionGuardResult;
       }
       if (parsed.data.createParentDirectories === true) {
         await mkdir(dirname(resolvedPath), {

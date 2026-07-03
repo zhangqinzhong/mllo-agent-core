@@ -9,6 +9,7 @@ import { createAgentCoreEditFailureMessage } from "./agent-core-file-edit-contex
 import { createExactReplacementFileChangeProgress } from "./agent-core-file-change-progress";
 import { detectAgentCoreStaleFileWrite } from "./agent-core-file-stale-write";
 import type { AgentCoreFilesystemToolOptions } from "./agent-core-filesystem-tools";
+import { createAgentCoreProjectInstructionWriteGuard } from "./agent-core-project-instruction-write-guard";
 import type { AgentCoreToolDefinition, AgentCoreToolResult } from "./agent-core-tool-types";
 import { createAgentCoreToolInputValidationResult } from "./agent-core-tool-input-validation";
 
@@ -102,6 +103,9 @@ function replaceFileContent(input: EditFileInput, content: string): FileEditRepl
 export function createAgentCoreEditFileTool(
   options: AgentCoreFileEditToolOptions,
 ): AgentCoreToolDefinition {
+  const projectInstructionWriteGuard =
+    options.projectInstructionWriteGuard ??
+    createAgentCoreProjectInstructionWriteGuard(options.permissionContext);
   return {
     name: "edit_file",
     description:
@@ -140,6 +144,10 @@ export function createAgentCoreEditFileTool(
           content: realPathDecision.reason,
           isError: true,
         };
+      }
+      const instructionGuardResult = await projectInstructionWriteGuard.checkTarget(resolvedPath);
+      if (instructionGuardResult !== undefined) {
+        return instructionGuardResult;
       }
       const currentContent = await readFile(resolvedPath, "utf8");
       const replaced = replaceFileContent(parsed.data, currentContent);

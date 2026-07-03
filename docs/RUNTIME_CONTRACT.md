@@ -96,6 +96,7 @@ JSONL transcript 是会话事实来源。
 - 对当前 `cwd`，必须从所属 workspace root 到当前目录逐层读取 `AGENTS.md`，越靠近 `cwd` 的规则越后出现。
 - 发现过程不能越过 workspace root，避免父目录规则泄漏到无关项目。
 - 额外 workspace root 不在当前 `cwd` 祖先链上时，只读取该 root 自身的 `AGENTS.md`。
+- 写类文件工具在修改目标路径前，必须检查目标文件额外适用但尚未出现在当前 prompt context 里的 `AGENTS.md`；发现后本次不能写文件，必须把规则回灌给模型并要求重试。
 - 宿主应用不能绕过 core 自行拼接项目规则；否则 CLI、桌面端和服务端会看到不同上下文。
 
 ### 5. Permissions

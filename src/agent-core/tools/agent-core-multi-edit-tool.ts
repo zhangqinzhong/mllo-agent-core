@@ -9,6 +9,7 @@ import { createAgentCoreEditFailureMessage } from "./agent-core-file-edit-contex
 import { createMultiExactReplacementFileChangeProgress } from "./agent-core-file-change-progress";
 import { detectAgentCoreStaleFileWrite } from "./agent-core-file-stale-write";
 import type { AgentCoreFilesystemToolOptions } from "./agent-core-filesystem-tools";
+import { createAgentCoreProjectInstructionWriteGuard } from "./agent-core-project-instruction-write-guard";
 import type { AgentCoreToolDefinition, AgentCoreToolResult } from "./agent-core-tool-types";
 import { createAgentCoreToolInputValidationResult } from "./agent-core-tool-input-validation";
 
@@ -139,6 +140,9 @@ function applyMultiEdit(input: MultiEditInput, content: string): MultiEditApplyR
 export function createAgentCoreMultiEditTool(
   options: AgentCoreFilesystemToolOptions,
 ): AgentCoreToolDefinition {
+  const projectInstructionWriteGuard =
+    options.projectInstructionWriteGuard ??
+    createAgentCoreProjectInstructionWriteGuard(options.permissionContext);
   return {
     name: "multi_edit",
     description:
@@ -177,6 +181,10 @@ export function createAgentCoreMultiEditTool(
           content: realPathDecision.reason,
           isError: true,
         };
+      }
+      const instructionGuardResult = await projectInstructionWriteGuard.checkTarget(resolvedPath);
+      if (instructionGuardResult !== undefined) {
+        return instructionGuardResult;
       }
       const currentContent = await readFile(resolvedPath, "utf8");
       const applied = applyMultiEdit(parsed.data, currentContent);

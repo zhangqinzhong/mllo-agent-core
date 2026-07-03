@@ -8,6 +8,7 @@ import {
 } from "../permissions/workspace-path-policy";
 import type { AgentCoreToolDefinition } from "./agent-core-tool-types";
 import { createAgentCoreToolInputValidationResult } from "./agent-core-tool-input-validation";
+import type { AgentCoreProjectInstructionWriteGuard } from "./agent-core-project-instruction-write-guard";
 
 const DEFAULT_MAX_READ_BYTES = 200_000;
 const DEFAULT_MAX_DIRECTORY_ENTRIES = 200;
@@ -41,6 +42,7 @@ export type AgentCoreFilesystemToolOptions = {
   maxDirectoryEntries?: number;
   maxGrepFiles?: number;
   maxGrepMatches?: number;
+  projectInstructionWriteGuard?: AgentCoreProjectInstructionWriteGuard;
   onBeforeFileWrite?: (snapshot: {
     path: string;
     resolvedPath: string;
