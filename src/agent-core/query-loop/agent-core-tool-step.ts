@@ -72,11 +72,16 @@ function toolExecutionResultContent(
         },
       });
     case "permission-required":
-    case "permission-denied":
       return {
         content: execution.decision.reason,
         isError: true,
         errorKind: "tool-error",
+      };
+    case "permission-denied":
+      return {
+        content: execution.decision.reason,
+        isError: true,
+        errorKind: "permission-denied",
       };
   }
 }
@@ -151,7 +156,7 @@ async function* handleToolCompletion(args: {
     const result: AgentCoreToolResult = {
       content: execution.decision.reason,
       isError: true,
-      errorKind: "tool-error",
+      errorKind: "permission-denied",
     };
     appendToolMessage(messages, call, result);
     yield {

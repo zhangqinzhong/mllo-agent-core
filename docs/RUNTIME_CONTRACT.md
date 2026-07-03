@@ -93,6 +93,7 @@ JSONL transcript 是会话事实来源。
 稳定要求：
 
 - `allow`、`ask`、`deny` 的语义不能漂移。
+- permission resume 继续执行同一 assistant turn 时，如果后续工具再次触发权限请求，必须再次返回 `waiting-for-permission`，不能把它伪造成普通 `tool_result`。
 - workspace roots 是文件工具的硬边界。
 - shell 风险解释必须能被 UI 原样展示。
 - 保存规则只能保存明确可解释的规则，不能保存含混输入。

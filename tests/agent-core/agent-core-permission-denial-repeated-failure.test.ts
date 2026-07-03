@@ -19,6 +19,25 @@ async function drainAgentCoreGenerator<T>(
   }
 }
 
+async function collectAgentCoreGenerator<T>(
+  generator: AsyncGenerator<AgentCoreQueryEvent, T>,
+): Promise<{
+  events: AgentCoreQueryEvent[];
+  result: T;
+}> {
+  const events: AgentCoreQueryEvent[] = [];
+  while (true) {
+    const item = await generator.next();
+    if (item.done === true) {
+      return {
+        events,
+        result: item.value,
+      };
+    }
+    events.push(item.value);
+  }
+}
+
 describe("agent core permission denial repeated failure guard", () => {
   it("records automatic permission denial as a tool result before unchanged retry guard runs", async () => {
     let permissionChecks = 0;
@@ -83,7 +102,7 @@ describe("agent core permission denial repeated failure guard", () => {
     );
     expect(deniedToolResult?.content).toBe("Writing locked.txt is blocked by policy.");
     expect(deniedToolResult?.isError).toBe(true);
-    expect(deniedToolResult?.errorKind).toBe("tool-error");
+    expect(deniedToolResult?.errorKind).toBe("permission-denied");
 
     const second = await drainAgentCoreGenerator(
       runAgentCoreQueryLoop({
@@ -183,7 +202,7 @@ describe("agent core permission denial repeated failure guard", () => {
     );
     expect(deniedToolResult?.content).toBe("Permission denied by user: User rejected the write.");
     expect(deniedToolResult?.isError).toBe(true);
-    expect(deniedToolResult?.errorKind).toBe("tool-error");
+    expect(deniedToolResult?.errorKind).toBe("permission-denied");
 
     const repeatedFailure = createAgentCoreRepeatedToolFailureResult({
       messages: resumed.messages,
@@ -196,5 +215,98 @@ describe("agent core permission denial repeated failure guard", () => {
     expect(repeatedFailure?.content).toContain(
       "Permission denied by user: User rejected the write.",
     );
+  });
+
+  it("pauses again when permission resume reaches another gated tool", async () => {
+    const firstCall = {
+      id: "call_write_first",
+      name: "write_file",
+      input: {
+        path: "first.txt",
+        content: "one",
+      },
+    };
+    const secondCall = {
+      id: "call_write_second",
+      name: "write_file",
+      input: {
+        path: "second.txt",
+        content: "two",
+      },
+    };
+    const waitingResult: Extract<AgentCoreQueryLoopResult, { status: "waiting-for-permission" }> = {
+      status: "waiting-for-permission",
+      messages: [
+        {
+          role: "user",
+          content: "write two files",
+        },
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [firstCall, secondCall],
+        },
+      ],
+      call: firstCall,
+      decision: {
+        status: "ask",
+        capability: "file-write",
+        reason: "Write first.txt?",
+      },
+    };
+    const writes: string[] = [];
+    const writeTool: AgentCoreToolDefinition = {
+      name: "write_file",
+      description: "Write a file.",
+      evaluatePermission: (input) => ({
+        status: "ask",
+        capability: "file-write",
+        reason: `Write ${(input as { path?: string }).path ?? "file"}?`,
+      }),
+      run: async (input) => {
+        writes.push((input as { path: string }).path);
+        return {
+          content: `wrote ${(input as { path: string }).path}`,
+        };
+      },
+    };
+
+    const { events, result } = await collectAgentCoreGenerator(
+      resumeAgentCorePermissionDecision({
+        waitingResult,
+        cwd: "/tmp/project",
+        tools: [writeTool],
+        decision: {
+          status: "allow",
+        },
+      }),
+    );
+
+    expect(result.status).toBe("waiting-for-permission");
+    if (result.status !== "waiting-for-permission") {
+      throw new Error("expected another permission pause");
+    }
+    expect(result.call.id).toBe("call_write_second");
+    expect(result.messages).toContainEqual(
+      expect.objectContaining({
+        role: "tool",
+        toolCallId: "call_write_first",
+        content: "wrote first.txt",
+      }),
+    );
+    expect(
+      result.messages.some(
+        (message) => message.role === "tool" && message.toolCallId === "call_write_second",
+      ),
+    ).toBe(false);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "permission-required",
+        call: expect.objectContaining({
+          id: "call_write_second",
+        }),
+      }),
+    );
+    expect(writes).toEqual(["first.txt"]);
   });
 });

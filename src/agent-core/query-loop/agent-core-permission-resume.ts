@@ -38,10 +38,27 @@ export type AgentCorePermissionResumeArgs = {
   requestWorkerPermission?: AgentCoreQueryLoopArgs["requestWorkerPermission"];
 };
 
-export type AgentCorePermissionResumeResult = {
-  messages: AgentCoreMessage[];
-  resumedCall: AgentCoreToolCall;
-};
+export type AgentCorePermissionResumeResult =
+  | {
+      status: "resumed";
+      messages: AgentCoreMessage[];
+      resumedCall: AgentCoreToolCall;
+    }
+  | (Extract<
+      AgentCoreQueryLoopResult,
+      {
+        status: "waiting-for-permission" | "denied";
+      }
+    > & {
+      resumedCall: AgentCoreToolCall;
+    });
+
+type AgentCorePermissionResumePauseResult = Extract<
+  AgentCorePermissionResumeResult,
+  {
+    status: "waiting-for-permission" | "denied";
+  }
+>;
 
 // 找到最后一个带 toolCalls 的 assistant 消息。权限恢复只处理当前悬停的 assistant turn。
 function lastAssistantToolCalls(messages: readonly AgentCoreMessage[]): AgentCoreToolCall[] {
@@ -75,11 +92,16 @@ function toolResultFromExecution(execution: AgentCoreToolExecutionResult): Agent
         errorKind: "unknown-tool",
       };
     case "permission-required":
-    case "permission-denied":
       return {
         content: execution.decision.reason,
         isError: true,
         errorKind: "tool-error",
+      };
+    case "permission-denied":
+      return {
+        content: execution.decision.reason,
+        isError: true,
+        errorKind: "permission-denied",
       };
   }
 }
@@ -126,7 +148,7 @@ function* denyPermissionResume(
   yield* appendToolResult(messages, call, {
     content: `Permission denied by user: ${decision.reason}`,
     isError: true,
-    errorKind: "tool-error",
+    errorKind: "permission-denied",
   });
   yield* appendMissingToolResults(
     messages,
@@ -135,15 +157,29 @@ function* denyPermissionResume(
   );
 }
 
+function* appendPermissionDeniedResult(
+  messages: AgentCoreMessage[],
+  call: AgentCoreToolCall,
+  execution: Extract<AgentCoreToolExecutionResult, { status: "permission-denied" }>,
+): Generator<AgentCoreQueryEvent, void> {
+  const result = toolResultFromExecution(execution);
+  yield {
+    type: "permission-denied",
+    call,
+    decision: execution.decision,
+  };
+  yield* appendToolResult(messages, call, result);
+}
+
 // 用户允许权限时执行当前工具，并继续处理同一 assistant turn 后续工具。
 async function* allowPermissionResume(
   args: AgentCorePermissionResumeArgs,
   messages: AgentCoreMessage[],
   calls: readonly AgentCoreToolCall[],
-): AsyncGenerator<AgentCoreQueryEvent, void> {
+): AsyncGenerator<AgentCoreQueryEvent, AgentCorePermissionResumePauseResult | null> {
   const [call, ...remainingCalls] = calls;
   if (call === undefined) {
-    return;
+    return null;
   }
 
   const running = startRunningAgentCoreTool({
@@ -180,6 +216,30 @@ async function* allowPermissionResume(
     }
     execution = update.execution;
   }
+  if (execution.status === "permission-required") {
+    yield {
+      type: "permission-required",
+      call,
+      decision: execution.decision,
+    };
+    return {
+      status: "waiting-for-permission",
+      messages,
+      call,
+      decision: execution.decision,
+      resumedCall: args.waitingResult.call,
+    };
+  }
+  if (execution.status === "permission-denied") {
+    yield* appendPermissionDeniedResult(messages, call, execution);
+    return {
+      status: "denied",
+      messages,
+      call,
+      decision: execution.decision,
+      resumedCall: args.waitingResult.call,
+    };
+  }
   yield* appendToolResult(messages, call, toolResultFromExecution(execution));
 
   for await (const update of runAgentCoreToolCalls({
@@ -205,24 +265,58 @@ async function* allowPermissionResume(
       yield update;
       continue;
     }
+    if (update.execution.status === "permission-required") {
+      yield {
+        type: "permission-required",
+        call: update.call,
+        decision: update.execution.decision,
+      };
+      return {
+        status: "waiting-for-permission",
+        messages,
+        call: update.call,
+        decision: update.execution.decision,
+        resumedCall: args.waitingResult.call,
+      };
+    }
+    if (update.execution.status === "permission-denied") {
+      yield* appendPermissionDeniedResult(messages, update.call, update.execution);
+      return {
+        status: "denied",
+        messages,
+        call: update.call,
+        decision: update.execution.decision,
+        resumedCall: args.waitingResult.call,
+      };
+    }
     yield* appendToolResult(messages, update.call, toolResultFromExecution(update.execution));
   }
+  return null;
 }
 
-// 恢复 permission-required 状态。返回的 messages 可直接作为下一轮 queryLoop 输入。
+// 恢复 permission-required 状态；后续工具再次要权限时继续返回等待状态。
 export async function* resumeAgentCorePermissionDecision(
   args: AgentCorePermissionResumeArgs,
 ): AsyncGenerator<AgentCoreQueryEvent, AgentCorePermissionResumeResult> {
   const messages = [...args.waitingResult.messages];
   const calls = callsFromPermissionPoint(lastAssistantToolCalls(messages), args.waitingResult.call);
 
-  const updates =
-    args.decision.status === "deny"
-      ? denyPermissionResume(messages, calls, args.decision)
-      : allowPermissionResume(args, messages, calls);
-  yield* updates;
+  if (args.decision.status === "deny") {
+    yield* denyPermissionResume(messages, calls, args.decision);
+    return {
+      status: "resumed",
+      messages,
+      resumedCall: args.waitingResult.call,
+    };
+  }
+
+  const paused = yield* allowPermissionResume(args, messages, calls);
+  if (paused !== null) {
+    return paused;
+  }
 
   return {
+    status: "resumed",
     messages,
     resumedCall: args.waitingResult.call,
   };

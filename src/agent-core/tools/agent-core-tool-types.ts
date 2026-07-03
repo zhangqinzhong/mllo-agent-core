@@ -41,6 +41,7 @@ export type AgentCoreToolErrorKind =
   | "duplicate-call"
   | "repeated-failure"
   | "runtime-exception"
+  | "permission-denied"
   | "tool-error"
   | "cancelled-sibling"
   | "interrupted-tool-call";

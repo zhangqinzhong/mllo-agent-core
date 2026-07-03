@@ -284,17 +284,44 @@ export async function* runAgentCoreController(
           session: session.handle,
         };
       }
-      await syncThreadState(result);
-      messages = yield* resumeAgentCoreRunPermission({
-        session,
-        result,
-        cwd,
-        tools: context.tools,
-        signal: options.signal,
-        requestWorkerPermission,
-        onPermissionRequest: options.onPermissionRequest,
-        workers: options.workers ?? [],
-      });
+      let permissionResult: Extract<
+        AgentCoreQueryLoopResult,
+        { status: "waiting-for-permission" }
+      > = result;
+      while (true) {
+        await syncThreadState(permissionResult);
+        const resumeResult = yield* resumeAgentCoreRunPermission({
+          session,
+          result: permissionResult,
+          cwd,
+          tools: context.tools,
+          signal: options.signal,
+          requestWorkerPermission,
+          onPermissionRequest: options.onPermissionRequest,
+          workers: options.workers ?? [],
+        });
+        persistedMessageCount = await recordAgentCoreRunMessagesFrom({
+          session,
+          messages: resumeResult.messages,
+          startIndex: persistedMessageCount,
+        });
+        if (resumeResult.status === "resumed") {
+          messages = resumeResult.messages;
+          break;
+        }
+        if (
+          resumeResult.status === "waiting-for-permission" &&
+          options.onPermissionRequest !== undefined
+        ) {
+          permissionResult = resumeResult;
+          continue;
+        }
+        await syncThreadState(resumeResult);
+        return {
+          ...resumeResult,
+          session: session.handle,
+        };
+      }
     }
   } finally {
     try {
