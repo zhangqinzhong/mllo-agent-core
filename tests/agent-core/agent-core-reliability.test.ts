@@ -362,4 +362,109 @@ describe("agent core reliability guards", () => {
     expect(result.status).toBe("completed");
     expect(toolRanBeforeModelTurnClosed).toBe(false);
   });
+
+  it("normalizes duplicate streaming tool call ids before recording tool results", async () => {
+    const toolInputs: unknown[] = [];
+    let streamCount = 0;
+    const tool: AgentCoreToolDefinition = {
+      name: "echo",
+      description: "Echo the input.",
+      isConcurrencySafe: () => true,
+      run: async (input) => {
+        toolInputs.push(input);
+        return {
+          content: JSON.stringify(input),
+        };
+      },
+    };
+
+    const events = [];
+    const loop = runAgentCoreQueryLoop({
+      cwd: "/tmp/project",
+      messages: [
+        {
+          role: "user",
+          content: "run duplicate ids",
+        },
+      ],
+      tools: [tool],
+      model: {
+        stream: async function* () {
+          streamCount += 1;
+          if (streamCount === 1) {
+            yield {
+              type: "tool-call",
+              call: {
+                id: "call_same",
+                name: "echo",
+                input: {
+                  value: 1,
+                },
+              },
+            };
+            yield {
+              type: "tool-call",
+              call: {
+                id: "call_same",
+                name: "echo",
+                input: {
+                  value: 2,
+                },
+              },
+            };
+            yield {
+              type: "message-end",
+            };
+            return;
+          }
+          yield {
+            type: "text-delta",
+            content: "done",
+          };
+          yield {
+            type: "message-end",
+          };
+        },
+      },
+      maxTurns: 3,
+    });
+
+    let result;
+    while (true) {
+      const item = await loop.next();
+      if (item.done === true) {
+        result = item.value;
+        break;
+      }
+      events.push(item.value);
+    }
+
+    const assistantWithTools = result.messages.find(
+      (message) => message.role === "assistant" && (message.toolCalls?.length ?? 0) > 0,
+    );
+    const toolMessages = result.messages.filter((message) => message.role === "tool");
+
+    expect(result.status).toBe("completed");
+    expect(toolInputs).toEqual([
+      {
+        value: 1,
+      },
+      {
+        value: 2,
+      },
+    ]);
+    expect(assistantWithTools?.toolCalls?.map((call) => call.id)).toEqual([
+      "call_same",
+      "call_same_2",
+    ]);
+    expect(assistantWithTools?.toolCalls?.[1]?.idRepairStatus).toEqual({
+      status: "duplicate-id-renamed",
+      originalId: "call_same",
+      occurrence: 2,
+    });
+    expect(toolMessages.map((message) => message.toolCallId)).toEqual(["call_same", "call_same_2"]);
+    expect(
+      events.filter((event) => event.type === "tool-call").map((event) => event.call.id),
+    ).toEqual(["call_same", "call_same_2"]);
+  });
 });

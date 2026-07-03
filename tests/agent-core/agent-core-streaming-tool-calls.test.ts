@@ -4,7 +4,11 @@ import {
   mergeOpenAIToolCallDeltas,
   type OpenAIStreamingToolCall,
 } from "../../src/agent-core/model/agent-core-openai-streaming-tool-calls";
-import { createAgentCoreToolCall } from "../../src/agent-core/model/agent-core-model-wire";
+import { renderAgentCoreCompactTranscript } from "../../src/agent-core/budget/agent-core-compact-transcript";
+import {
+  createAgentCoreToolCall,
+  ensureAgentCoreToolCallsUniqueIds,
+} from "../../src/agent-core/model/agent-core-model-wire";
 
 describe("agent core streaming tool calls", () => {
   it("continues OpenAI tool arguments by id when later chunks omit index", () => {
@@ -100,5 +104,75 @@ describe("agent core streaming tool calls", () => {
       },
     });
     expect(call.inputParseStatus?.rawPreview).toContain('"path"');
+  });
+
+  it("renames repeated tool call ids and records the original provider id", () => {
+    const calls = ensureAgentCoreToolCallsUniqueIds([
+      {
+        id: "call_same",
+        name: "list_dir",
+        input: {
+          path: ".",
+        },
+      },
+      {
+        id: "call_same",
+        name: "read_file",
+        input: {
+          path: "README.md",
+        },
+      },
+      {
+        id: "call_same",
+        name: "grep_files",
+        input: {
+          path: ".",
+          pattern: "mllo",
+        },
+      },
+    ]);
+
+    expect(calls.map((call) => call.id)).toEqual(["call_same", "call_same_2", "call_same_3"]);
+    expect(calls[0]?.idRepairStatus).toBeUndefined();
+    expect(calls[1]?.idRepairStatus).toEqual({
+      status: "duplicate-id-renamed",
+      originalId: "call_same",
+      occurrence: 2,
+    });
+    expect(calls[2]?.idRepairStatus).toEqual({
+      status: "duplicate-id-renamed",
+      originalId: "call_same",
+      occurrence: 3,
+    });
+  });
+
+  it("keeps tool call id repair metadata in compact transcript text", () => {
+    const call = ensureAgentCoreToolCallsUniqueIds([
+      {
+        id: "call_same",
+        name: "list_dir",
+        input: {
+          path: ".",
+        },
+      },
+      {
+        id: "call_same",
+        name: "read_file",
+        input: {
+          path: "README.md",
+        },
+      },
+    ])[1];
+
+    const transcript = renderAgentCoreCompactTranscript([
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: call === undefined ? [] : [call],
+      },
+    ]);
+
+    expect(transcript).toContain("idRepairStatus: duplicate-id-renamed");
+    expect(transcript).toContain("originalToolCallId: call_same");
   });
 });

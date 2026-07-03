@@ -102,6 +102,7 @@ JSONL transcript 是会话事实来源。
 稳定要求：
 
 - tool call id 只用于配对结果；重复检测必须按工具名和 JSON 参数判断。
+- 同一轮复用 tool call id 时必须改写成唯一 id，并保留原始 id 的 repair metadata，不能静默复用。
 - tool result 必须能和 assistant tool call 配对；compact、resume 和 rewind 类逻辑不能切断配对。
 - schema validation 和 malformed arguments 必须回灌给模型修复，不能静默执行。
 - schema validation feedback 必须包含校验问题、收到的参数预览和期望 schema 预览，帮助模型下一轮直接修正。

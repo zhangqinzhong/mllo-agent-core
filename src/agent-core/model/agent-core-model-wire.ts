@@ -235,9 +235,15 @@ export function ensureAgentCoreToolCallUniqueId(
   if (count === 0) {
     return call;
   }
+  const occurrence = count + 1;
   return {
     ...call,
-    id: `${call.id}_${count + 1}`,
+    id: `${call.id}_${occurrence}`,
+    idRepairStatus: {
+      status: "duplicate-id-renamed",
+      originalId: call.idRepairStatus?.originalId ?? call.id,
+      occurrence,
+    },
   };
 }
 

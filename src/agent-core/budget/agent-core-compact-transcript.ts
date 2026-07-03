@@ -1,11 +1,11 @@
-import type { AgentCoreMessage } from '../query-loop/agent-core-query-types'
+import type { AgentCoreMessage } from "../query-loop/agent-core-query-types";
 
-function renderToolCalls(message: Extract<AgentCoreMessage, { role: 'assistant' }>): string[] {
+function renderToolCalls(message: Extract<AgentCoreMessage, { role: "assistant" }>): string[] {
   if (message.toolCalls === undefined || message.toolCalls.length === 0) {
-    return []
+    return [];
   }
   return [
-    'toolCalls:',
+    "toolCalls:",
     ...message.toolCalls.map((call) =>
       [
         `- id: ${call.id}`,
@@ -15,34 +15,40 @@ function renderToolCalls(message: Extract<AgentCoreMessage, { role: 'assistant' 
           ? []
           : [
               `  inputParseStatus: ${call.inputParseStatus.status}`,
-              `  rawArgumentsPreview: ${call.inputParseStatus.rawPreview}`
-            ])
-      ].join('\n')
-    )
-  ]
+              `  rawArgumentsPreview: ${call.inputParseStatus.rawPreview}`,
+            ]),
+        ...(call.idRepairStatus === undefined
+          ? []
+          : [
+              `  idRepairStatus: ${call.idRepairStatus.status}`,
+              `  originalToolCallId: ${call.idRepairStatus.originalId}`,
+            ]),
+      ].join("\n"),
+    ),
+  ];
 }
 
 function renderMessage(index: number, message: AgentCoreMessage): string {
-  if (message.role === 'assistant') {
+  if (message.role === "assistant") {
     return [
       `## Message ${index + 1}`,
       `role: ${message.role}`,
-      'content:',
+      "content:",
       message.content,
-      ...renderToolCalls(message)
-    ].join('\n')
+      ...renderToolCalls(message),
+    ].join("\n");
   }
-  if (message.role === 'tool') {
+  if (message.role === "tool") {
     return [
       `## Message ${index + 1}`,
       `role: ${message.role}`,
       `toolCallId: ${message.toolCallId}`,
       `name: ${message.name}`,
-      `isError: ${message.isError === true ? 'yes' : 'no'}`,
+      `isError: ${message.isError === true ? "yes" : "no"}`,
       ...(message.errorKind === undefined ? [] : [`errorKind: ${message.errorKind}`]),
       ...(message.outputTruncated === undefined
         ? []
-        : [`outputTruncated: ${message.outputTruncated ? 'yes' : 'no'}`]),
+        : [`outputTruncated: ${message.outputTruncated ? "yes" : "no"}`]),
       ...(message.outputOriginalChars === undefined
         ? []
         : [`outputOriginalChars: ${message.outputOriginalChars}`]),
@@ -55,19 +61,19 @@ function renderMessage(index: number, message: AgentCoreMessage): string {
       ...(message.outputBlobBytes === undefined
         ? []
         : [`outputBlobBytes: ${message.outputBlobBytes}`]),
-      'content:',
-      message.content
-    ].join('\n')
+      "content:",
+      message.content,
+    ].join("\n");
   }
-  return [`## Message ${index + 1}`, `role: ${message.role}`, 'content:', message.content].join(
-    '\n'
-  )
+  return [`## Message ${index + 1}`, `role: ${message.role}`, "content:", message.content].join(
+    "\n",
+  );
 }
 
 // compact 摘要模型需要结构化 transcript，裸 JSON 会让 tool call/result 关系变难读。
 export function renderAgentCoreCompactTranscript(messages: readonly AgentCoreMessage[]): string {
   if (messages.length === 0) {
-    return 'No messages to summarize.'
+    return "No messages to summarize.";
   }
-  return messages.map((message, index) => renderMessage(index, message)).join('\n\n---\n\n')
+  return messages.map((message, index) => renderMessage(index, message)).join("\n\n---\n\n");
 }
