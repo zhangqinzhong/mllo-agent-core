@@ -7,6 +7,7 @@ export { redactAgentCorePermissionCallInput } from "../runtime/agent-core-permis
 
 export {
   findAgentCoreTranscriptPath,
+  getAgentCoreConfigDir,
   getAgentCoreProjectDir,
   getAgentCoreTranscriptPath,
 } from "../session/agent-core-session-paths";
@@ -33,6 +34,7 @@ export { AgentCoreCheckpointStore } from "../checkpoint/agent-core-checkpoint-st
 export type { AgentCoreCheckpointRecord } from "../checkpoint/agent-core-checkpoint-store";
 export {
   previewAgentCoreCheckpointRecord,
+  readAgentCoreCheckpointRecord,
   restoreAgentCoreCheckpointRecord,
 } from "../checkpoint/agent-core-checkpoint-restore";
 export type {
@@ -75,11 +77,15 @@ export type { AgentCoreElicitationResumeDecision } from "../query-loop/agent-cor
 
 export type {
   AgentCoreWorker,
+  AgentCoreWorkerAvailabilityCheckResult,
+  AgentCoreWorkerAvailabilityPolicy,
   AgentCoreWorkerCapability,
   AgentCoreWorkerEvent,
   AgentCoreWorkerId,
   AgentCoreWorkerPermissionDecision,
   AgentCoreWorkerPermissionRequest,
+  AgentCoreWorkerRequest,
+  AgentCoreWorkerResult,
 } from "../workers/agent-core-worker-types";
 export {
   readAgentCoreWorkerToolResultBlob,
