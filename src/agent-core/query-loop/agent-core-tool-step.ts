@@ -266,11 +266,18 @@ async function* handleToolCompletion(args: {
   return null;
 }
 
-function* maybeYieldToolBatchSummary(args: {
+async function* maybeYieldToolBatchSummary(args: {
+  queryArgs: AgentCoreQueryLoopArgs;
   turn: number;
   completedItems: readonly AgentCoreToolBatchCompletedItem[];
-}): Generator<AgentCoreQueryEvent> {
-  const summary = createAgentCoreToolBatchSummary(args.completedItems);
+  lastAssistantText?: string;
+}): AsyncGenerator<AgentCoreQueryEvent> {
+  const summary = await createAgentCoreToolBatchSummary({
+    completedItems: args.completedItems,
+    model: args.queryArgs.toolSummaryModel ?? args.queryArgs.model,
+    signal: args.queryArgs.signal,
+    lastAssistantText: args.lastAssistantText,
+  });
   if (summary === undefined) {
     return;
   }
@@ -293,6 +300,9 @@ export async function* runToolCallsStep(args: {
   const duplicateTracker = createAgentCoreDuplicateToolCallTracker();
   const resultBudget = createAgentCoreToolResultTurnBudget();
   const completedItems: AgentCoreToolBatchCompletedItem[] = [];
+  const lastAssistantText = [...args.messages]
+    .reverse()
+    .find((message) => message.role === "assistant")?.content;
   const remainingCallsAfter = (call: AgentCoreToolCall): readonly AgentCoreToolCall[] => {
     const index = args.calls.findIndex((candidate) => candidate.id === call.id);
     return index >= 0 ? args.calls.slice(index + 1) : [];
@@ -338,8 +348,10 @@ export async function* runToolCallsStep(args: {
     });
     if (result !== null) {
       yield* maybeYieldToolBatchSummary({
+        queryArgs: args.queryArgs,
         turn: args.turn,
         completedItems,
+        lastAssistantText,
       });
       return result;
     }
@@ -362,8 +374,10 @@ export async function* runToolCallsStep(args: {
       onToolComplete,
     });
     yield* maybeYieldToolBatchSummary({
+      queryArgs: args.queryArgs,
       turn: args.turn,
       completedItems,
+      lastAssistantText,
     });
     return result;
   }
@@ -391,8 +405,10 @@ export async function* runToolCallsStep(args: {
       });
       if (result !== null) {
         yield* maybeYieldToolBatchSummary({
+          queryArgs: args.queryArgs,
           turn: args.turn,
           completedItems,
+          lastAssistantText,
         });
         return result;
       }
@@ -408,16 +424,20 @@ export async function* runToolCallsStep(args: {
     });
     if (result !== null) {
       yield* maybeYieldToolBatchSummary({
+        queryArgs: args.queryArgs,
         turn: args.turn,
         completedItems,
+        lastAssistantText,
       });
       return result;
     }
   }
 
   yield* maybeYieldToolBatchSummary({
+    queryArgs: args.queryArgs,
     turn: args.turn,
     completedItems,
+    lastAssistantText,
   });
   return null;
 }

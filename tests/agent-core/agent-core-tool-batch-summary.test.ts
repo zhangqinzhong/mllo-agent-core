@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { runAgentCoreQueryLoop } from "../../src/agent-core/query-loop/agent-core-query-loop";
 import type {
+  AgentCoreModelRequest,
   AgentCoreQueryEvent,
   AgentCoreQueryLoopResult,
 } from "../../src/agent-core/query-loop/agent-core-query-types";
@@ -112,6 +113,7 @@ describe("agent core tool batch summary", () => {
       turn: 1,
       summary: {
         label: "Ran 2 tools: read_file, run_tests (1 failed)",
+        labelSource: "deterministic",
         toolCallIds: ["call_0", "call_1"],
         okCount: 1,
         errorCount: 1,
@@ -163,6 +165,7 @@ describe("agent core tool batch summary", () => {
     const serialized = JSON.stringify(summary.summary);
     expect(summary.summary).toMatchObject({
       label: "secret_tool completed with truncated output",
+      labelSource: "deterministic",
       okCount: 1,
       truncatedCount: 1,
       items: [
@@ -178,5 +181,91 @@ describe("agent core tool batch summary", () => {
     expect(serialized).not.toContain(secret);
     expect(serialized).not.toContain("token");
     expect(serialized).not.toContain("output contains");
+  });
+
+  it("uses a model-generated short label when a summary model is available", async () => {
+    let streamCount = 0;
+    let summaryRequest: AgentCoreModelRequest | undefined;
+    const tool: AgentCoreToolDefinition = {
+      name: "read_config",
+      description: "Read config.",
+      run: async () => ({
+        content: "config contents ".repeat(80),
+      }),
+    };
+    const events: AgentCoreQueryEvent[] = [];
+    const loop = runAgentCoreQueryLoop({
+      cwd: "/tmp/project",
+      messages: [
+        {
+          role: "user",
+          content: "inspect config",
+        },
+      ],
+      tools: [tool],
+      model: {
+        stream: async function* () {
+          streamCount += 1;
+          if (streamCount === 1) {
+            yield {
+              type: "tool-call",
+              call: {
+                id: "call_config",
+                name: "read_config",
+                input: {
+                  path: "config.json",
+                  note: "x".repeat(500),
+                },
+              },
+            };
+            yield {
+              type: "message-end",
+            };
+            return;
+          }
+          yield {
+            type: "text-delta",
+            content: "done",
+          };
+          yield {
+            type: "message-end",
+          };
+        },
+      },
+      toolSummaryModel: {
+        complete: async (request) => {
+          summaryRequest = request;
+          return {
+            content: "Read config.json",
+          };
+        },
+      },
+      maxTurns: 3,
+    });
+
+    while (true) {
+      const item = await loop.next();
+      if (item.done === true) {
+        break;
+      }
+      events.push(item.value);
+    }
+
+    const summary = events.find((event) => event.type === "tool-batch-summary");
+    expect(summary).toMatchObject({
+      type: "tool-batch-summary",
+      summary: {
+        label: "Read config.json",
+        labelSource: "model",
+        toolCallIds: ["call_config"],
+      },
+    });
+    expect(summaryRequest?.tools).toEqual([]);
+    expect(summaryRequest?.systemPrompt).toContain("Write a short summary label");
+    expect(summaryRequest?.messages[0]?.content).toContain("Tool: read_config");
+    expect(summaryRequest?.messages[0]?.content).toContain("Input:");
+    expect(summaryRequest?.messages[0]?.content).toContain("Output:");
+    expect(summaryRequest?.messages[0]?.content).toContain("...");
+    expect(summaryRequest?.messages[0]?.content.length).toBeLessThan(1_200);
   });
 });

@@ -99,6 +99,7 @@ export type AgentCoreQueryLoopArgs = {
   turnContext?: string;
   messages: readonly AgentCoreMessage[];
   model: AgentCoreModelAdapter;
+  toolSummaryModel?: AgentCoreModelAdapter;
   tools?: readonly AgentCoreToolDefinition[];
   hooks?: readonly AgentCoreHookDefinition[];
   middlewares?: readonly AgentCoreMiddleware[];
