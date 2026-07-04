@@ -37,6 +37,11 @@
       "require": "./dist/src/observer/index.js",
       "default": "./dist/src/observer/index.js"
     },
+    "./desktop-host": {
+      "types": "./dist/src/agent-core/desktop-host/index.d.ts",
+      "require": "./dist/src/agent-core/desktop-host/index.js",
+      "default": "./dist/src/agent-core/desktop-host/index.js"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {
@@ -48,7 +53,7 @@
     "smoke:cli": "node dist/src/cli/mllo-cli.js --help",
     "build": "tsc -p tsconfig.json",
     "clean": "node config/scripts/clean-dist.mjs",
-    "prepare": "husky"
+    "prepare": "node config/scripts/prepare-package.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
