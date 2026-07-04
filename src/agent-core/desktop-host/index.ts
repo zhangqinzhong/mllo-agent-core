@@ -75,6 +75,7 @@ export type { AgentCoreElicitationResumeDecision } from "../query-loop/agent-cor
 
 export type {
   AgentCoreWorker,
+  AgentCoreWorkerCapability,
   AgentCoreWorkerEvent,
   AgentCoreWorkerId,
   AgentCoreWorkerPermissionDecision,
