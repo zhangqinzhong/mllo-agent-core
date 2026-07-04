@@ -11,6 +11,10 @@ export type {
 export type { AgentCorePromptProfile } from "./context/agent-core-prompt-profile";
 
 export { runAgentCoreQueryLoop } from "./query-loop/agent-core-query-loop";
+export type {
+  AgentCoreContinuation,
+  AgentCoreContinuationEvent,
+} from "./query-loop/agent-core-continuation";
 export {
   AGENT_CORE_PERSISTED_TOOL_OUTPUT_TAG,
   AGENT_CORE_TOOL_RESULTS_PER_TURN_MAX_CHARS,
@@ -27,6 +31,14 @@ export type {
   AgentCoreToolResultBlobReference,
   AgentCoreToolResultBlobStore,
 } from "./query-loop/agent-core-query-types";
+export {
+  joinAgentCorePromptBlocks,
+  MLLO_SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+} from "./query-loop/agent-core-prompt-block-types";
+export type {
+  AgentCorePromptBlock,
+  AgentCorePromptCacheScope,
+} from "./query-loop/agent-core-prompt-block-types";
 export { createAgentCoreMiddlewareChain } from "./middleware/agent-core-middleware-chain";
 export type {
   AgentCoreMiddleware,

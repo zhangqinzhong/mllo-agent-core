@@ -154,6 +154,7 @@ JSONL transcript 是会话事实来源。
 - 同一 assistant turn 的所有 `tool_result` 必须共享总输出预算，避免多个工具结果各自不过限但合计打爆下一轮上下文。
 - 当 runtime 提供 blob store 时，被共享预算裁剪的 `tool_result` 必须保留 `outputBlobPath` 和 `outputBlobBytes`，并在模型可见正文中渲染 `<mllo_persisted_tool_output>` 块；完整输出不能静默丢失。
 - 每轮工具批次完成后可以产生 `tool-batch-summary` timeline event；默认应调用 summary model 生成短 label，失败时降级到确定性 label；event 只能保存 label、tool id/name、状态、错误类别和截断/blob 元数据，不能复制原始 tool input 或 output。
+- 每次 query loop 决定再次进入模型调用时必须产生 `continue` timeline event，并用 `continuation.reason` 区分 `next_turn`、`stop_hook_blocking`、`reactive_compact_retry`、permission/elicitation resume 等路径；宿主 UI 可以忽略该事件，但 JSONL/observer 必须保留它。
 - 同一 autonomous loop 内已失败的同名同参工具调用再次出现时必须生成 repeated-failure，而不是再次执行。
 - 权限拒绝必须写成带错误分类的 tool_result；即使 run 进入 denied 终态，也不能留下未闭合的 tool call。
 - query loop 入口和 session resume 都必须修复缺失或错位的 tool_result，不能把悬空 tool_call 发送给模型端点。
@@ -179,7 +180,7 @@ core 不猜宿主应用的数据目录。宿主应用必须显式传入 runtime 
 允许自由修改：
 
 - 内部实现细节。
-- observer 页面样式。
+- observer API 内部展示方式。
 - token 估算策略。
 - provider adapter 的内部 wire 解析。
 - 测试 fixture。

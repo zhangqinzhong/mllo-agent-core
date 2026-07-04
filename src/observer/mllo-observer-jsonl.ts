@@ -6,6 +6,8 @@ export type MlloObserverJsonlTailOptions = {
   maxEntries?: number;
   maxBytes?: number;
   redactSecrets?: boolean;
+  includeParsed?: boolean;
+  maxJsonChars?: number;
 };
 
 const DEFAULT_MAX_ENTRIES = 300;
@@ -20,28 +22,47 @@ function parseJsonlLine(args: {
   ordinal: number;
   lineNumber?: number;
   redactSecrets?: boolean;
+  includeParsed?: boolean;
+  maxJsonChars?: number;
 }): MlloObserverJsonlEntry {
   try {
     const parsed = JSON.parse(args.line) as unknown;
     const redacted = redactMlloObserverValue(parsed, {
       redactSecrets: args.redactSecrets,
     });
+    const json = truncateJsonText(JSON.stringify(redacted, null, 2), args.maxJsonChars);
     return {
       ordinal: args.ordinal,
       ...(args.lineNumber === undefined ? {} : { lineNumber: args.lineNumber }),
       ...extractJsonlLabels(redacted),
-      json: JSON.stringify(redacted, null, 2),
-      parsed: redacted,
+      json: json.text,
+      ...(json.truncated ? { truncatedJson: true } : {}),
+      ...(args.includeParsed === false ? {} : { parsed: redacted }),
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    const json = truncateJsonText(redactMlloObserverText(args.line), args.maxJsonChars);
     return {
       ordinal: args.ordinal,
       ...(args.lineNumber === undefined ? {} : { lineNumber: args.lineNumber }),
-      json: redactMlloObserverText(args.line),
+      json: json.text,
+      ...(json.truncated ? { truncatedJson: true } : {}),
       parseError: message,
     };
   }
+}
+
+function truncateJsonText(text: string, maxChars?: number): { text: string; truncated: boolean } {
+  if (maxChars === undefined || text.length <= maxChars) {
+    return {
+      text,
+      truncated: false,
+    };
+  }
+  return {
+    text: `${text.slice(0, maxChars)}\n... truncated ${text.length - maxChars} chars ...`,
+    truncated: true,
+  };
 }
 
 function extractJsonlLabels(
@@ -108,6 +129,8 @@ export async function readMlloObserverJsonlTail(
           ordinal: omittedByEntryLimit + index + 1,
           ...(lineNumberOffset === undefined ? {} : { lineNumber: lineNumberOffset + index + 1 }),
           redactSecrets: options.redactSecrets,
+          includeParsed: options.includeParsed,
+          maxJsonChars: options.maxJsonChars,
         }),
       ),
     };

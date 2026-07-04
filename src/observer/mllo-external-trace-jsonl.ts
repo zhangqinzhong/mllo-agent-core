@@ -88,6 +88,8 @@ export async function readMlloExternalTraceLog(
   return await readMlloObserverJsonlTail(getMlloExternalTracePath(options.source, options), {
     maxEntries: options.maxEntries,
     maxBytes: options.maxBytes,
+    maxJsonChars: options.maxJsonChars,
+    includeParsed: options.includeParsed,
     redactSecrets: options.redactSecrets,
   });
 }

@@ -16,6 +16,9 @@ import type { AgentCorePermissionDecision } from "../permissions/agent-core-perm
 import type { AgentCoreModelErrorCode } from "../model/agent-core-model-error-classification";
 import type { AgentCoreMiddleware } from "../middleware/agent-core-middleware-types";
 import type { AgentCoreToolBatchSummary } from "./agent-core-tool-batch-summary";
+import type { AgentCorePromptBlock } from "./agent-core-prompt-block-types";
+import type { AgentCoreModelUsage } from "../model/agent-core-model-usage";
+import type { AgentCoreContinuationEvent } from "./agent-core-continuation";
 
 // Query loop 内部消息格式。它先保持模型无关，后续再由 adapter 转成具体模型协议格式。
 export type AgentCoreMessage =
@@ -46,11 +49,13 @@ export type AgentCoreMessage =
 export type AgentCoreModelResponse = {
   content: string;
   toolCalls?: AgentCoreToolCall[];
+  usage?: AgentCoreModelUsage;
 };
 
 // 模型调用参数。stream 和 complete 共享它，避免 adapter 两套上下文漂移。
 export type AgentCoreModelRequest = {
   systemPrompt?: string;
+  systemPromptBlocks?: readonly AgentCorePromptBlock[];
   messages: readonly AgentCoreMessage[];
   tools: readonly AgentCoreToolDefinition[];
   signal?: AbortSignal;
@@ -68,6 +73,7 @@ export type AgentCoreModelStreamEvent =
     }
   | {
       type: "message-end";
+      usage?: AgentCoreModelUsage;
     };
 
 // 模型适配器接口。query loop 不知道底层是哪种模型或 worker。
@@ -96,6 +102,7 @@ export type AgentCoreToolResultBlobStore = (args: {
 export type AgentCoreQueryLoopArgs = {
   cwd: string;
   systemPrompt?: string;
+  systemPromptBlocks?: readonly AgentCorePromptBlock[];
   turnContext?: string;
   messages: readonly AgentCoreMessage[];
   model: AgentCoreModelAdapter;
@@ -116,6 +123,7 @@ export type AgentCoreQueryLoopArgs = {
 // query loop 对外发出的 timeline 事件。GUI 可以直接订阅这些事件渲染进度。
 export type AgentCoreQueryEvent =
   | AgentCoreHookEvent
+  | AgentCoreContinuationEvent
   | {
       type: "turn-start";
       turn: number;

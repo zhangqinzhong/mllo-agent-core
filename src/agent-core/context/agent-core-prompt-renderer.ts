@@ -5,24 +5,168 @@ import {
   isAgentCoreLocalCompactPromptProfile,
   type AgentCorePromptProfile,
 } from "./agent-core-prompt-profile";
+import {
+  joinAgentCorePromptBlocks,
+  MLLO_SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+  type AgentCorePromptBlock,
+  type AgentCorePromptCacheScope,
+} from "../query-loop/agent-core-prompt-block-types";
 
 // 渲染列表段落。空列表显式写 none，避免模型误以为信息遗漏。
 function renderList(items: readonly string[]): string {
   return items.length === 0 ? "- none" : items.map((item) => `- ${item}`).join("\n");
 }
 
-// 渲染稳定策略段落。策略和运行时上下文分离，避免动态信息污染长期行为协议。
-function renderSystemPolicy(policy: AgentCoreSystemPolicy): string {
+function promptBlock(args: {
+  name: string;
+  text: string;
+  cacheScope: AgentCorePromptCacheScope;
+}): AgentCorePromptBlock {
+  return {
+    name: args.name,
+    text: args.text.trim(),
+    cacheScope: args.cacheScope,
+  };
+}
+
+function promptBlockName(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+// 渲染系统策略头。身份信息必须在最前面，方便所有 provider 缓存共同前缀。
+function renderSystemPolicyHeader(policy: AgentCoreSystemPolicy): string {
+  return ["# System Policy", `productName: ${policy.productName}`, `role: ${policy.role}`].join(
+    "\n",
+  );
+}
+
+function renderSystemPolicySection(section: AgentCoreSystemPolicy["sections"][number]): string {
+  return [`## ${section.title}`, renderList(section.bullets)].join("\n");
+}
+
+// 渲染稳定策略 blocks。静态层拆成多个块，后续协议层可以精确放置缓存断点。
+function renderSystemPolicyBlocks(policy: AgentCoreSystemPolicy): AgentCorePromptBlock[] {
   return [
-    "# System Policy",
-    `productName: ${policy.productName}`,
-    `role: ${policy.role}`,
+    promptBlock({
+      name: "system_policy_header",
+      text: renderSystemPolicyHeader(policy),
+      cacheScope: "global",
+    }),
+    ...policy.sections.map((section) =>
+      promptBlock({
+        name: `system_policy_${promptBlockName(section.title)}`,
+        text: renderSystemPolicySection(section),
+        cacheScope: "global",
+      }),
+    ),
+    promptBlock({
+      name: "system_prompt_dynamic_boundary",
+      text: MLLO_SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+      cacheScope: "global",
+    }),
+  ];
+}
+
+// 渲染 session 级上下文。它会写入 snapshot，动态状态另由 TurnContext 每轮刷新。
+function renderSessionContextBlocks(
+  context: AgentCorePromptContext,
+  options: {
+    profile?: AgentCorePromptProfile;
+  },
+): AgentCorePromptBlock[] {
+  return [
+    promptBlock({
+      name: "tools",
+      cacheScope: "session",
+      text: ["# Tools", renderTools(context)].join("\n"),
+    }),
+    promptBlock({
+      name: "skills",
+      cacheScope: "session",
+      text: ["# Skills", renderSkills(context, options.profile)].join("\n"),
+    }),
+    promptBlock({
+      name: "mcp_configs",
+      cacheScope: "session",
+      text: ["# MCP Configs", renderMcpConfigs(context)].join("\n"),
+    }),
+    promptBlock({
+      name: "memory",
+      cacheScope: "session",
+      text: ["# Memory", renderMemory(context)].join("\n"),
+    }),
+    promptBlock({
+      name: "project_instructions",
+      cacheScope: "session",
+      text: ["# Project Instructions", renderProjectInstructions(context)].join("\n"),
+    }),
+  ];
+}
+
+// 渲染旧版完整 system prompt。保留给调试和旧调用点，真实请求优先使用 blocks。
+function renderLegacySystemPrompt(
+  context: AgentCorePromptContext,
+  options: {
+    profile?: AgentCorePromptProfile;
+  } = {},
+): string {
+  const policy = createAgentCoreSystemPolicy();
+  return [
+    renderSystemPolicyHeader(policy),
     "",
-    ...policy.sections.flatMap((section) => [
-      `## ${section.title}`,
-      renderList(section.bullets),
-      "",
-    ]),
+    ...policy.sections.flatMap((section) => [renderSystemPolicySection(section), ""]),
+    MLLO_SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+    "",
+    "# Runtime Context",
+    `generatedAt: ${context.generatedAt}`,
+    `cwd: ${context.cwd}`,
+    `shellCwd: ${context.shellCwd}`,
+    `sandboxPolicy: ${context.runtime.sandboxPolicy}`,
+    `shellBackendKind: ${context.runtime.shellBackend.kind}`,
+    `shellBackendLabel: ${context.runtime.shellBackend.label ?? "unset"}`,
+    `shellBackendRemote: ${context.runtime.shellBackend.remote ? "yes" : "no"}`,
+    `shellBackendSandboxed: ${context.runtime.shellBackend.sandboxed ? "yes" : "no"}`,
+    `shellBackendCwdTrackingMode: ${context.runtime.shellBackend.cwdTrackingMode ?? "unset"}`,
+    `shellBackendAllowedRemoteSecretLikeEnvNames: ${context.runtime.shellBackend.allowedRemoteSecretLikeEnvNames.join(", ") || "none"}`,
+    "",
+    "# Permissions",
+    renderPermissionContext(context),
+    "",
+    "# Tools",
+    renderTools(context),
+    "",
+    "# Skills",
+    renderSkills(context, options.profile),
+    "",
+    "# MCP Configs",
+    renderMcpConfigs(context),
+    "",
+    "# Session",
+    renderSessionState(context),
+    "",
+    "# Model",
+    renderModelProfile(context),
+    "",
+    "# Budget",
+    renderBudgetState(context),
+    "",
+    "# Shell Tasks",
+    renderShellTasks(context),
+    "",
+    "# Plan",
+    renderPlan(context),
+    "",
+    "# Workflow Runs",
+    renderWorkflowRuns(context),
+    "",
+    "# Memory",
+    renderMemory(context),
+    "",
+    "# Project Instructions",
+    renderProjectInstructions(context),
   ].join("\n");
 }
 
@@ -269,62 +413,34 @@ function renderWorkflowRuns(context: AgentCorePromptContext): string {
     .join("\n\n---\n\n");
 }
 
-// 把结构化 prompt context 渲染成 system prompt。adapter 后续可以选择直接用结构化对象。
+// 把结构化 prompt context 渲染成缓存友好的 system blocks。
+export function renderAgentCoreSystemPromptBlocks(
+  context: AgentCorePromptContext,
+  options: {
+    profile?: AgentCorePromptProfile;
+  } = {},
+): AgentCorePromptBlock[] {
+  return [
+    ...renderSystemPolicyBlocks(createAgentCoreSystemPolicy()),
+    ...renderSessionContextBlocks(context, options),
+  ];
+}
+
+// 把结构化 prompt context 渲染成 system prompt。保留字符串形式用于兼容旧 adapter 和日志。
 export function renderAgentCoreSystemPrompt(
   context: AgentCorePromptContext,
   options: {
     profile?: AgentCorePromptProfile;
   } = {},
 ): string {
-  return [
-    renderSystemPolicy(createAgentCoreSystemPolicy()),
-    "",
-    "# Runtime Context",
-    `generatedAt: ${context.generatedAt}`,
-    `cwd: ${context.cwd}`,
-    `shellCwd: ${context.shellCwd}`,
-    `sandboxPolicy: ${context.runtime.sandboxPolicy}`,
-    `shellBackendKind: ${context.runtime.shellBackend.kind}`,
-    `shellBackendLabel: ${context.runtime.shellBackend.label ?? "unset"}`,
-    `shellBackendRemote: ${context.runtime.shellBackend.remote ? "yes" : "no"}`,
-    `shellBackendSandboxed: ${context.runtime.shellBackend.sandboxed ? "yes" : "no"}`,
-    `shellBackendCwdTrackingMode: ${context.runtime.shellBackend.cwdTrackingMode ?? "unset"}`,
-    `shellBackendAllowedRemoteSecretLikeEnvNames: ${context.runtime.shellBackend.allowedRemoteSecretLikeEnvNames.join(", ") || "none"}`,
-    "",
-    "# Permissions",
-    renderPermissionContext(context),
-    "",
-    "# Tools",
-    renderTools(context),
-    "",
-    "# Skills",
-    renderSkills(context, options.profile),
-    "",
-    "# MCP Configs",
-    renderMcpConfigs(context),
-    "",
-    "# Session",
-    renderSessionState(context),
-    "",
-    "# Model",
-    renderModelProfile(context),
-    "",
-    "# Budget",
-    renderBudgetState(context),
-    "",
-    "# Shell Tasks",
-    renderShellTasks(context),
-    "",
-    "# Plan",
-    renderPlan(context),
-    "",
-    "# Workflow Runs",
-    renderWorkflowRuns(context),
-    "",
-    "# Memory",
-    renderMemory(context),
-    "",
-    "# Project Instructions",
-    renderProjectInstructions(context),
-  ].join("\n");
+  return joinAgentCorePromptBlocks(renderAgentCoreSystemPromptBlocks(context, options));
+}
+
+export function renderAgentCoreLegacySystemPrompt(
+  context: AgentCorePromptContext,
+  options: {
+    profile?: AgentCorePromptProfile;
+  } = {},
+): string {
+  return renderLegacySystemPrompt(context, options);
 }

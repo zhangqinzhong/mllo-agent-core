@@ -26,6 +26,10 @@ import {
   appendAgentCoreAssistantMessage,
 } from "./agent-core-query-loop-response";
 import { runAgentCoreStopHooksStep } from "./agent-core-query-loop-stop-hooks";
+import {
+  createAgentCoreContinuationEvent,
+  type AgentCoreContinuation,
+} from "./agent-core-continuation";
 import type {
   AgentCoreQueryEvent,
   AgentCoreQueryLoopArgs,
@@ -50,6 +54,7 @@ export async function* runAgentCoreQueryLoop(
   let queryArgs = args;
   const maxTurns = args.maxTurns ?? DEFAULT_MAX_TURNS;
   let pendingToolCalls: AgentCoreToolCall[] = [];
+  let previousContinuation: AgentCoreContinuation | undefined;
   const finish = (result: AgentCoreQueryLoopResult) =>
     finishAgentCoreQueryLoopResult({
       queryArgs,
@@ -109,7 +114,8 @@ export async function* runAgentCoreQueryLoop(
       return yield* finish(result);
     }
 
-    for (let turn = 1; turn <= maxTurns; turn += 1) {
+    let turn = 1;
+    while (turn <= maxTurns) {
       if (isAgentCoreQueryStopped(queryArgs.signal)) {
         const reason = "Agent run was stopped before the next model turn.";
         yield {
@@ -191,6 +197,21 @@ export async function* runAgentCoreQueryLoop(
           });
         }
         if (hookDecision.action === "request-continue") {
+          const nextTurn = turn + 1;
+          if (nextTurn > maxTurns) {
+            break;
+          }
+          const continuation: AgentCoreContinuation = {
+            reason: "stop_hook_blocking",
+          };
+          yield createAgentCoreContinuationEvent({
+            continuation,
+            previousContinuation,
+            turn,
+            messageCount: messages.length,
+          });
+          previousContinuation = continuation;
+          turn = nextTurn;
           continue;
         }
         if (hookDecision.action === "block") {
@@ -254,6 +275,21 @@ export async function* runAgentCoreQueryLoop(
         return yield* finish(toolResult);
       }
       pendingToolCalls = [];
+      const nextTurn = turn + 1;
+      if (nextTurn > maxTurns) {
+        break;
+      }
+      const continuation: AgentCoreContinuation = {
+        reason: "next_turn",
+      };
+      yield createAgentCoreContinuationEvent({
+        continuation,
+        previousContinuation,
+        turn,
+        messageCount: messages.length,
+      });
+      previousContinuation = continuation;
+      turn = nextTurn;
     }
 
     const message = `Agent run exceeded maxTurns=${maxTurns}.`;

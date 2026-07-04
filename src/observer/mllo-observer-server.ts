@@ -1,7 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { AddressInfo } from "node:net";
 import { handleMlloObserverApiRequest } from "./mllo-observer-api";
-import { renderMlloObserverPage } from "./mllo-observer-page";
 import { listMlloObserverSessions } from "./mllo-observer-sessions";
 import type { MlloObserverOptions, MlloObserverServerHandle } from "./mllo-observer-types";
 
@@ -16,12 +15,18 @@ function sendNotFound(response: ServerResponse): void {
   response.end("Not found");
 }
 
-function sendPage(response: ServerResponse): void {
+function sendIndex(response: ServerResponse): void {
   response.writeHead(200, {
-    "content-type": "text/html; charset=utf-8",
+    "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store",
   });
-  response.end(renderMlloObserverPage());
+  response.end(
+    JSON.stringify({
+      name: "mllo observer",
+      type: "api",
+      endpoints: ["/api/sessions", "/api/sessions/:id", "/api/external-traces", "/events"],
+    }),
+  );
 }
 
 function sendSse(response: ServerResponse, eventName: string, data: unknown): void {
@@ -85,7 +90,7 @@ async function handleRequest(
 ): Promise<void> {
   const pathname = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
   if (pathname === "/" || pathname === "/index.html") {
-    sendPage(response);
+    sendIndex(response);
     return;
   }
   if (pathname === "/events") {

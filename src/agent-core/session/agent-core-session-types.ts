@@ -3,6 +3,7 @@ import type {
   AgentCoreQueryEvent,
   AgentCoreQueryLoopResult,
 } from "../query-loop/agent-core-query-types";
+import type { AgentCorePromptBlock } from "../query-loop/agent-core-prompt-block-types";
 import type { AgentCoreElicitationResumeDecision } from "../query-loop/agent-core-elicitation-resume";
 import type { AgentCoreCompactRecord } from "../budget/agent-core-budget-types";
 import type { AgentCoreHookPhase } from "../hooks/agent-core-hook-types";
@@ -44,6 +45,7 @@ export type AgentCoreSystemContextSnapshot = {
   version: 1;
   reason: "session-created" | "compact";
   prompt: string;
+  promptBlocks?: AgentCorePromptBlock[];
   promptContext: unknown;
 };
 

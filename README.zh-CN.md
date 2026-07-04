@@ -93,10 +93,11 @@ mllo observe --port 43110
 `mllo chat` 会预加载所选 `--cwd` 的输入历史，并把当前或恢复会话的 prompt
 排在前面。
 
-`mllo observe` 会启动一个只读本地 Web Observer，默认绑定
+`mllo observe` 会启动一个只读本地 observer API，默认绑定
 `127.0.0.1`。它读取 `state.sqlite`、`session_index.jsonl`、transcript
-JSONL 和 `dump-prompts` 文件，用来查看 sessions、timeline、prompt dump、
-tool events 和脱敏后的原始 JSON。它不会执行工具，也不会参与 agent 决策。
+JSONL 和 `dump-prompts` 文件，并通过 JSON endpoint 暴露 sessions、timeline、
+prompt dump、tool events 和脱敏后的原始 JSON。它不会执行工具，也不会参与
+agent 决策。
 
 ## 快速开始
 

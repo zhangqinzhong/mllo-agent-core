@@ -71,6 +71,10 @@ export type {
 export { computeMlloCommandHookTrustedHash } from "../hooks/agent-core-command-hook-trust";
 
 export type {
+  AgentCoreContinuation,
+  AgentCoreContinuationEvent,
+} from "../query-loop/agent-core-continuation";
+export type {
   AgentCoreQueryEvent,
   AgentCoreQueryLoopResult,
 } from "../query-loop/agent-core-query-types";

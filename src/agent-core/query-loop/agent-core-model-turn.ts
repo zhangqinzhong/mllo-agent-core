@@ -23,6 +23,7 @@ import type {
   AgentCoreQueryEvent,
   AgentCoreQueryLoopArgs,
 } from "./agent-core-query-types";
+import type { AgentCoreModelUsage } from "../model/agent-core-model-usage";
 
 export type AgentCoreModelTurn = {
   response: AgentCoreModelResponse;
@@ -116,6 +117,7 @@ async function readCompleteModelTurn(
         response: normalizeModelResponseToolCalls(
           await complete({
             systemPrompt: args.systemPrompt,
+            systemPromptBlocks: args.systemPromptBlocks,
             messages: messagesForModelRequest(args, messages),
             tools: args.tools ?? [],
             signal: args.signal,
@@ -185,6 +187,7 @@ export async function* readAgentCoreModelTurn(
   for (let attempt = 1; attempt <= MAX_MODEL_TURN_ATTEMPTS; attempt += 1) {
     let content = "";
     const toolCalls: AgentCoreToolCall[] = [];
+    let usage: AgentCoreModelUsage | undefined;
     const seenToolCallSignatures = new Set<string>();
     let observedModelOutput = false;
     let canPreExecuteStreamingTools = true;
@@ -192,6 +195,7 @@ export async function* readAgentCoreModelTurn(
     try {
       for await (const event of args.model.stream({
         systemPrompt: args.systemPrompt,
+        systemPromptBlocks: args.systemPromptBlocks,
         messages: messagesForModelRequest(args, messages),
         tools: args.tools ?? [],
         signal: args.signal,
@@ -244,6 +248,7 @@ export async function* readAgentCoreModelTurn(
         }
 
         if (event.type === "message-end") {
+          usage = event.usage;
           break;
         }
       }
@@ -252,6 +257,7 @@ export async function* readAgentCoreModelTurn(
         response: {
           content,
           toolCalls,
+          ...(usage === undefined ? {} : { usage }),
         },
         preExecutedToolCalls,
       };
@@ -267,6 +273,7 @@ export async function* readAgentCoreModelTurn(
           response: {
             content,
             toolCalls,
+            ...(usage === undefined ? {} : { usage }),
           },
           preExecutedToolCalls,
           // 流已经产生可见输出时不能重试，否则 GUI 和 transcript 会出现重复前缀。

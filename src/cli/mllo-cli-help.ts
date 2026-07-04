@@ -12,7 +12,7 @@ Usage:
 Commands:
   run              Run one non-interactive agent turn.
   chat             Start a line-based interactive session.
-  observe          Start the read-only local web observer.
+  observe          Start the read-only local observer API.
   config path      Print the active config path.
   config init      Create a local starter config.
 

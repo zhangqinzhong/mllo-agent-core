@@ -112,11 +112,11 @@ using `state.sqlite` first and `session_index.jsonl` as a fallback.
 `mllo chat` preloads input history for the selected `--cwd`, with the current
 or resumed session's prompts first.
 
-`mllo observe` starts a read-only local web observer bound to `127.0.0.1` by
+`mllo observe` starts a read-only local observer API bound to `127.0.0.1` by
 default. It reads `state.sqlite`, `session_index.jsonl`, transcript JSONL files,
-and `dump-prompts` files, then shows sessions, timeline entries, prompt dumps,
-tool events, and raw redacted JSON. It does not execute tools or participate in
-agent decisions.
+and `dump-prompts` files, then exposes sessions, timeline entries, prompt dumps,
+tool events, and raw redacted JSON through JSON endpoints. It does not execute
+tools or participate in agent decisions.
 
 ## Quick Start
 

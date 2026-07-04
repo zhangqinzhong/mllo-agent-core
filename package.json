@@ -51,6 +51,9 @@
     "verify": "npm run lint && npm run typecheck && npm test && npm run clean && npm run build && npm run pack:check && npm run smoke:cli",
     "pack:check": "npm pack --dry-run --json | node config/scripts/verify-pack.mjs",
     "smoke:cli": "node dist/src/cli/mllo-cli.js --help",
+    "claude:trace:enable": "node scripts/configure-claude-code-trace-proxy.mjs enable",
+    "claude:trace:restore": "node scripts/configure-claude-code-trace-proxy.mjs restore",
+    "claude:trace:status": "node scripts/configure-claude-code-trace-proxy.mjs status",
     "build": "tsc -p tsconfig.json",
     "clean": "node config/scripts/clean-dist.mjs",
     "prepare": "node config/scripts/prepare-package.mjs"

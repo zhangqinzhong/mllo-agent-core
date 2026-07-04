@@ -6,6 +6,10 @@ import type {
   AgentCoreQueryLoopArgs,
   AgentCoreQueryLoopResult,
 } from "../query-loop/agent-core-query-types";
+import {
+  createAgentCoreContinuationEvent,
+  type AgentCoreContinuation,
+} from "../query-loop/agent-core-continuation";
 import { runAgentCoreQueryLoop } from "../query-loop/agent-core-query-loop";
 import { appendAgentCoreInputHistoryEntry } from "../session/agent-core-input-history";
 import { writeAgentCoreToolResultBlob } from "../tools/agent-core-tool-result-blob-store";
@@ -18,6 +22,8 @@ import {
   createAgentCoreReactiveCompactFailureMessage,
   createAgentCoreReactiveCompactBudget,
   renderAgentCoreRunSystemPrompt,
+  renderAgentCoreRunSystemPromptBlocks,
+  renderAgentCoreRunTurnContext,
   shouldRunAgentCoreReactiveCompact,
   shouldStopAfterAgentCoreReactiveCompact,
 } from "./agent-core-reactive-compact";
@@ -155,8 +161,44 @@ export async function* runAgentCoreController(
     };
     await syncThreadState();
     let systemPrompt = context.systemPrompt;
+    let systemPromptBlocks = context.systemPromptBlocks;
+    let turnContext = context.queryArgs.turnContext;
+    let previousContinuation: AgentCoreContinuation | undefined;
+    const rememberContinuationEvent = (event: AgentCoreQueryEvent): void => {
+      if (event.type === "continue") {
+        previousContinuation = event.continuation;
+      }
+    };
+    const recordContinuation = async (args: {
+      continuation: AgentCoreContinuation;
+      messageCount: number;
+    }): Promise<AgentCoreQueryEvent> => {
+      const event = createAgentCoreContinuationEvent({
+        continuation: args.continuation,
+        previousContinuation,
+        messageCount: args.messageCount,
+      });
+      previousContinuation = args.continuation;
+      return await recordAgentCoreRunEvent({
+        session,
+        event,
+        workers: options.workers ?? [],
+      });
+    };
     if (budgeted.compacted) {
       systemPrompt = renderAgentCoreRunSystemPrompt({
+        promptContext: context.promptContext,
+        promptProfile: context.promptProfile,
+        budgetState,
+        budgetOptions: options.budget,
+      });
+      systemPromptBlocks = renderAgentCoreRunSystemPromptBlocks({
+        promptContext: context.promptContext,
+        promptProfile: context.promptProfile,
+        budgetState,
+        budgetOptions: options.budget,
+      });
+      turnContext = renderAgentCoreRunTurnContext({
         promptContext: context.promptContext,
         promptProfile: context.promptProfile,
         budgetState,
@@ -165,6 +207,7 @@ export async function* runAgentCoreController(
       await recordAgentCoreSystemContextSnapshot({
         session,
         prompt: systemPrompt,
+        promptBlocks: systemPromptBlocks,
         promptContext: context.promptContext,
         reason: "compact",
       });
@@ -197,6 +240,8 @@ export async function* runAgentCoreController(
       const generator = runAgentCoreQueryLoop({
         ...context.queryArgs,
         systemPrompt,
+        systemPromptBlocks,
+        turnContext,
         messages,
         hooks,
         requestWorkerPermission,
@@ -214,6 +259,7 @@ export async function* runAgentCoreController(
           event: item.value,
           workers: options.workers ?? [],
         });
+        rememberContinuationEvent(recordedEvent);
         yield recordedEvent;
       }
       if (
@@ -247,11 +293,30 @@ export async function* runAgentCoreController(
           budgetState,
           budgetOptions: options.budget,
         });
+        systemPromptBlocks = renderAgentCoreRunSystemPromptBlocks({
+          promptContext: context.promptContext,
+          promptProfile: context.promptProfile,
+          budgetState,
+          budgetOptions: options.budget,
+        });
+        turnContext = renderAgentCoreRunTurnContext({
+          promptContext: context.promptContext,
+          promptProfile: context.promptProfile,
+          budgetState,
+          budgetOptions: options.budget,
+        });
         await recordAgentCoreSystemContextSnapshot({
           session,
           prompt: systemPrompt,
+          promptBlocks: systemPromptBlocks,
           promptContext: context.promptContext,
           reason: "compact",
+        });
+        yield await recordContinuation({
+          continuation: {
+            reason: "reactive_compact_retry",
+          },
+          messageCount: messages.length,
         });
         continue;
       }
@@ -297,6 +362,12 @@ export async function* runAgentCoreController(
           signal: options.signal,
           workers: options.workers ?? [],
         });
+        yield await recordContinuation({
+          continuation: {
+            reason: "elicitation_resume",
+          },
+          messageCount: messages.length,
+        });
         continue;
       }
       if (result.status !== "waiting-for-permission" || options.onPermissionRequest === undefined) {
@@ -330,6 +401,12 @@ export async function* runAgentCoreController(
         });
         if (resumeResult.status === "resumed") {
           messages = resumeResult.messages;
+          yield await recordContinuation({
+            continuation: {
+              reason: "permission_resume",
+            },
+            messageCount: messages.length,
+          });
           break;
         }
         if (
@@ -337,6 +414,12 @@ export async function* runAgentCoreController(
           options.onPermissionRequest !== undefined
         ) {
           permissionResult = resumeResult;
+          yield await recordContinuation({
+            continuation: {
+              reason: "permission_followup",
+            },
+            messageCount: resumeResult.messages.length,
+          });
           continue;
         }
         await syncThreadState(resumeResult);

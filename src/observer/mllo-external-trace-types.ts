@@ -61,6 +61,8 @@ export type MlloExternalTraceLogReadOptions = MlloExternalTraceJsonlOptions & {
   source: MlloExternalTraceSource;
   maxEntries?: number;
   maxBytes?: number;
+  maxJsonChars?: number;
+  includeParsed?: boolean;
   redactSecrets?: boolean;
 };
 

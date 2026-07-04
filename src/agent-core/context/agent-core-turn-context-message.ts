@@ -202,6 +202,19 @@ function renderTurnBudget(context: AgentCorePromptContext): string {
   ].join("\n");
 }
 
+// 渲染当前模型能力。不同 adapter 能力不同，本段必须随每轮请求刷新。
+function renderTurnModelProfile(context: AgentCorePromptContext): string {
+  if (context.modelProfile === undefined) {
+    return "model: unknown";
+  }
+  return [
+    `provider: ${context.modelProfile.provider}`,
+    `model: ${context.modelProfile.model}`,
+    `supportsStreaming: ${context.modelProfile.supportsStreaming ? "yes" : "no"}`,
+    `supportsToolUse: ${context.modelProfile.supportsToolUse ? "yes" : "no"}`,
+  ].join("\n");
+}
+
 // 渲染当前 memory。只有旧 snapshot 恢复时才需要在 turn context 里刷新。
 function renderTurnMemory(context: AgentCorePromptContext): string {
   if (context.memory.length === 0) {
@@ -290,6 +303,9 @@ export function renderAgentCoreTurnContextMessage(
     "",
     "# Tool Availability",
     renderTurnToolAvailability(context),
+    "",
+    "# Model",
+    renderTurnModelProfile(context),
     "",
     "# Budget",
     renderTurnBudget(context),

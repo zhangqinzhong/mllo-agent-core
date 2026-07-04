@@ -34,6 +34,7 @@ export type MlloObserverJsonlEntry = {
   kind?: string;
   type?: string;
   json: string;
+  truncatedJson?: boolean;
   parsed?: unknown;
   parseError?: string;
 };

@@ -93,6 +93,15 @@ function renderWorkerEvent(event: AgentCoreWorkerEvent): string | null {
   }
 }
 
+function renderContinuation(
+  event: Extract<AgentCoreQueryEvent, { type: "continue" }>,
+): string | null {
+  if (event.continuation.reason === "next_turn") {
+    return null;
+  }
+  return `[mllo] continue: ${event.continuation.reason}`;
+}
+
 export class MlloCliEventRenderer {
   private readonly outputFormat: MlloCliOutputFormat;
   private readonly stdout: Writable;
@@ -162,6 +171,13 @@ export class MlloCliEventRenderer {
 
   private renderTextEvent(event: AgentCoreQueryEvent): void {
     switch (event.type) {
+      case "continue": {
+        const line = renderContinuation(event);
+        if (line !== null) {
+          writeCliLine(this.stderr, line);
+        }
+        return;
+      }
       case "turn-start":
         return;
       case "assistant-message":

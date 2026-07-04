@@ -31,6 +31,10 @@ function readBoolean(value: string | null): boolean {
   return value === "1" || value === "true";
 }
 
+function readOptionalBoolean(value: string | null): boolean | undefined {
+  return value === null ? undefined : readBoolean(value);
+}
+
 function methodAllowed(request: IncomingMessage, response: ServerResponse): boolean {
   if (request.method === "GET" || request.method === "HEAD") {
     return true;
@@ -77,8 +81,10 @@ async function sendExternalTraceLog(
   const trace = await readMlloExternalTraceLog({
     homePath: context.options.homePath,
     source,
-    maxEntries: readPositiveInt(requestUrl.searchParams.get("limit"), 300),
-    maxBytes: readPositiveInt(requestUrl.searchParams.get("maxBytes"), 4 * 1024 * 1024),
+    maxEntries: readPositiveInt(requestUrl.searchParams.get("limit"), 20),
+    maxBytes: readPositiveInt(requestUrl.searchParams.get("maxBytes"), 2 * 1024 * 1024),
+    maxJsonChars: readPositiveInt(requestUrl.searchParams.get("maxJsonChars"), 500_000),
+    includeParsed: readOptionalBoolean(requestUrl.searchParams.get("includeParsed")) ?? false,
     redactSecrets: context.options.redactSecrets,
   });
   sendJson(response, 200, trace);
