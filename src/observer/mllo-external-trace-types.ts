@@ -79,3 +79,19 @@ export type MlloAnthropicTraceProxyHandle = {
   upstreamBaseUrl: string;
   close: () => Promise<void>;
 };
+
+export type MlloOpenAITraceProxyOptions = MlloExternalTraceJsonlOptions & {
+  host?: string;
+  port?: number;
+  upstreamBaseUrl?: string;
+  redactSecrets?: boolean;
+  captureBodies?: boolean;
+  maxBufferedRequestBytes?: number;
+  maxCapturedResponseBytes?: number;
+};
+
+export type MlloOpenAITraceProxyHandle = {
+  url: string;
+  upstreamBaseUrl: string;
+  close: () => Promise<void>;
+};

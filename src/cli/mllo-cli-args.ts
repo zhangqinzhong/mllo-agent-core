@@ -30,6 +30,10 @@ type MutableParsedArgs = {
   traceProxyHost?: string;
   traceProxyPort?: number;
   anthropicTraceUpstream?: string;
+  openaiTraceProxy: boolean;
+  openaiTraceProxyHost?: string;
+  openaiTraceProxyPort?: number;
+  openaiTraceUpstream?: string;
   traceCaptureBodies: boolean;
   continueLatest: boolean;
   force: boolean;
@@ -222,6 +226,24 @@ function applyOption(args: readonly string[], index: number, parsed: MutablePars
       parsed.anthropicTraceUpstream = next.value;
       return next.nextIndex;
     }
+    case "--openai-trace-proxy":
+      parsed.openaiTraceProxy = true;
+      return index;
+    case "--openai-trace-proxy-host": {
+      const next = nextValue();
+      parsed.openaiTraceProxyHost = next.value;
+      return next.nextIndex;
+    }
+    case "--openai-trace-proxy-port": {
+      const next = nextValue();
+      parsed.openaiTraceProxyPort = parsePositiveInt(next.value, flag);
+      return next.nextIndex;
+    }
+    case "--openai-upstream": {
+      const next = nextValue();
+      parsed.openaiTraceUpstream = next.value;
+      return next.nextIndex;
+    }
     case "--trace-capture-bodies":
       parsed.traceCaptureBodies = true;
       return index;
@@ -250,6 +272,7 @@ export function parseMlloCliArgs(
     outputFormat: "text",
     inputFormat: "text",
     anthropicTraceProxy: false,
+    openaiTraceProxy: false,
     traceCaptureBodies: false,
     continueLatest: false,
     force: false,
@@ -301,6 +324,16 @@ export function parseMlloCliArgs(
     ...(parsed.anthropicTraceUpstream === undefined
       ? {}
       : { anthropicTraceUpstream: parsed.anthropicTraceUpstream }),
+    openaiTraceProxy: parsed.openaiTraceProxy,
+    ...(parsed.openaiTraceProxyHost === undefined
+      ? {}
+      : { openaiTraceProxyHost: parsed.openaiTraceProxyHost }),
+    ...(parsed.openaiTraceProxyPort === undefined
+      ? {}
+      : { openaiTraceProxyPort: parsed.openaiTraceProxyPort }),
+    ...(parsed.openaiTraceUpstream === undefined
+      ? {}
+      : { openaiTraceUpstream: parsed.openaiTraceUpstream }),
     traceCaptureBodies: parsed.traceCaptureBodies,
     continueLatest: parsed.continueLatest,
     force: parsed.force,

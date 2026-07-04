@@ -242,16 +242,20 @@ MLLO_DUMP_PROMPTS=1
 
 这个文件适合排查模型协议、工具 schema 膨胀、上下文增长、流式响应错误和异常模型行为。
 
-`mllo observe` 也可以启动一个本地 Anthropic-compatible trace proxy，用来
-调试调用 `/v1/messages` 的外部 agent 或宿主进程：
+`mllo observe` 也可以启动本地 trace proxy，用来调试外部 agent 或宿主进程。
+当前支持 Anthropic `/v1/messages`、OpenAI-compatible `/v1/chat/completions`
+和 OpenAI Responses `/v1/responses`：
 
 ```sh
 mllo observe --anthropic-trace-proxy --trace-proxy-port 43111
 export ANTHROPIC_BASE_URL=http://127.0.0.1:43111
+
+mllo observe --openai-trace-proxy --openai-trace-proxy-port 43112
+export OPENAI_BASE_URL=http://127.0.0.1:43112/v1
 ```
 
 这个 proxy 会把请求透传到真实上游，同时把脱敏后的摘要写到
-`~/.mllo/external-traces/anthropic.jsonl`。只有明确需要本地保存脱敏后的
+`~/.mllo/external-traces/<source>.jsonl`。只有明确需要本地保存脱敏后的
 request/response body 时，才加 `--trace-capture-bodies`。
 
 ## 架构

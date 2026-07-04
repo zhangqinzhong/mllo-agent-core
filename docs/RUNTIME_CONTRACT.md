@@ -95,6 +95,7 @@ JSONL transcript 是会话事实来源。
 
 - 默认不开启本地代理；宿主或 CLI 必须显式打开。
 - trace proxy 必须透传请求，不能参与 agent 决策。
+- trace proxy 至少应覆盖 Anthropic `/v1/messages`、OpenAI-compatible `/v1/chat/completions` 和 OpenAI Responses `/v1/responses`。
 - 默认只保存请求/响应摘要；保存 body 必须由用户显式开启。
 - 写入前和展示前都必须脱敏常见 secret 字段。
 - external trace 不能混进 session transcript，也不能进入模型上下文。

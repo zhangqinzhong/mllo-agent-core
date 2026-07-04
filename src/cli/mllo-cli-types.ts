@@ -32,6 +32,10 @@ export type MlloCliParsedArgs = {
   traceProxyHost?: string;
   traceProxyPort?: number;
   anthropicTraceUpstream?: string;
+  openaiTraceProxy: boolean;
+  openaiTraceProxyHost?: string;
+  openaiTraceProxyPort?: number;
+  openaiTraceUpstream?: string;
   traceCaptureBodies: boolean;
   continueLatest: boolean;
   force: boolean;

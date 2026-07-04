@@ -1,5 +1,6 @@
 export { startMlloObserverServer } from "./mllo-observer-server";
 export { startMlloAnthropicTraceProxy } from "./mllo-anthropic-trace-proxy";
+export { startMlloOpenAITraceProxy } from "./mllo-openai-trace-proxy";
 export {
   appendMlloExternalTraceRecord,
   getMlloExternalTraceDir,
@@ -17,6 +18,8 @@ export type {
   MlloExternalTraceRequestSummary,
   MlloExternalTraceResponseSummary,
   MlloExternalTraceSource,
+  MlloOpenAITraceProxyHandle,
+  MlloOpenAITraceProxyOptions,
 } from "./mllo-external-trace-types";
 export type {
   MlloObserverJsonlEntry,

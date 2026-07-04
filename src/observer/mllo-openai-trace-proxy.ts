@@ -1,10 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
 import { appendMlloExternalTraceRecord } from "./mllo-external-trace-jsonl";
-import {
-  summarizeAnthropicMessageRequest,
-  summarizeAnthropicMessageResponse,
-} from "./mllo-anthropic-message-trace";
+import { summarizeOpenAIRequest, summarizeOpenAIResponse } from "./mllo-openai-message-trace";
 import {
   buildMlloTraceProxyUpstreamUrl,
   formatMlloTraceProxyError,
@@ -16,25 +13,33 @@ import {
   toMlloTraceProxyForwardHeaders,
 } from "./mllo-trace-proxy-http";
 import type {
-  MlloAnthropicTraceProxyHandle,
-  MlloAnthropicTraceProxyOptions,
   MlloExternalTraceRecord,
+  MlloOpenAITraceProxyHandle,
+  MlloOpenAITraceProxyOptions,
 } from "./mllo-external-trace-types";
 
 const DEFAULT_HOST = "127.0.0.1";
-const DEFAULT_PORT = 43111;
-const DEFAULT_UPSTREAM_BASE_URL = "https://api.anthropic.com";
+const DEFAULT_PORT = 43112;
+const DEFAULT_UPSTREAM_BASE_URL = "https://api.openai.com";
 const DEFAULT_MAX_BUFFERED_REQUEST_BYTES = 64 * 1024 * 1024;
 const DEFAULT_MAX_CAPTURED_RESPONSE_BYTES = 8 * 1024 * 1024;
 
-function isTraceableAnthropicMessagesRequest(request: IncomingMessage): boolean {
+function isTraceableOpenAIRequest(request: IncomingMessage): boolean {
+  if (request.method !== "POST") {
+    return false;
+  }
   const pathname = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
-  return request.method === "POST" && pathname === "/v1/messages";
+  return (
+    pathname === "/v1/chat/completions" ||
+    pathname === "/chat/completions" ||
+    pathname === "/v1/responses" ||
+    pathname === "/responses"
+  );
 }
 
-export async function startMlloAnthropicTraceProxy(
-  options: MlloAnthropicTraceProxyOptions = {},
-): Promise<MlloAnthropicTraceProxyHandle> {
+export async function startMlloOpenAITraceProxy(
+  options: MlloOpenAITraceProxyOptions = {},
+): Promise<MlloOpenAITraceProxyHandle> {
   const host = options.host ?? DEFAULT_HOST;
   const upstreamBaseUrl = options.upstreamBaseUrl ?? DEFAULT_UPSTREAM_BASE_URL;
   const server = createServer((request, response) => {
@@ -74,8 +79,8 @@ export async function startMlloAnthropicTraceProxy(
 async function handleProxyRequest(
   request: IncomingMessage,
   response: ServerResponse,
-  options: Required<Pick<MlloAnthropicTraceProxyOptions, "upstreamBaseUrl">> &
-    MlloAnthropicTraceProxyOptions,
+  options: Required<Pick<MlloOpenAITraceProxyOptions, "upstreamBaseUrl">> &
+    MlloOpenAITraceProxyOptions,
 ): Promise<void> {
   if (request.url === "/healthz") {
     sendMlloTraceProxyJson(response, 200, {
@@ -91,6 +96,7 @@ async function handleProxyRequest(
   const upstreamUrl = buildMlloTraceProxyUpstreamUrl({
     request,
     upstreamBaseUrl: options.upstreamBaseUrl,
+    dedupeVersionPrefix: "v1",
   });
   let body: Buffer;
   try {
@@ -105,8 +111,8 @@ async function handleProxyRequest(
     });
     return;
   }
-  const traceable = isTraceableAnthropicMessagesRequest(request);
-  const requestSummary = summarizeAnthropicMessageRequest({
+  const traceable = isTraceableOpenAIRequest(request);
+  const requestSummary = summarizeOpenAIRequest({
     method: request.method ?? "GET",
     pathname: upstreamUrl.pathname,
     body,
@@ -132,14 +138,14 @@ async function handleProxyRequest(
           type: "external_trace",
           schemaVersion: 1,
           id: traceId,
-          source: "anthropic",
-          protocol: "anthropic",
+          source: "openai",
+          protocol: "openai",
           startedAt,
           completedAt: new Date().toISOString(),
           durationMs: Date.now() - startedAtMs,
           upstreamUrl: upstreamUrl.toString(),
           request: requestSummary,
-          response: summarizeAnthropicMessageResponse({
+          response: summarizeOpenAIResponse({
             statusCode: upstreamResponse.status,
             contentType: upstreamResponse.headers.get("content-type") ?? undefined,
             body: captured.body,
@@ -167,8 +173,8 @@ async function handleProxyRequest(
         type: "external_trace",
         schemaVersion: 1,
         id: traceId,
-        source: "anthropic",
-        protocol: "anthropic",
+        source: "openai",
+        protocol: "openai",
         startedAt,
         completedAt: new Date().toISOString(),
         durationMs: Date.now() - startedAtMs,

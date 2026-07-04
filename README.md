@@ -273,17 +273,21 @@ Use this when diagnosing provider protocol issues, tool schema bloat, context
 growth, streaming errors, or unexpected model behavior.
 
 `mllo observe` can also start a local Anthropic-compatible trace proxy for
-debugging another agent or host process that calls `/v1/messages`:
+debugging another agent or host process. Supported endpoints include Anthropic
+`/v1/messages`, OpenAI-compatible `/v1/chat/completions`, and OpenAI Responses
+`/v1/responses`:
 
 ```sh
 mllo observe --anthropic-trace-proxy --trace-proxy-port 43111
 export ANTHROPIC_BASE_URL=http://127.0.0.1:43111
+
+mllo observe --openai-trace-proxy --openai-trace-proxy-port 43112
+export OPENAI_BASE_URL=http://127.0.0.1:43112/v1
 ```
 
 The proxy forwards requests to the real upstream and writes redacted summaries
-to `~/.mllo/external-traces/anthropic.jsonl`. Add `--trace-capture-bodies` only
-when you intentionally want redacted request/response bodies stored for local
-debugging.
+to `~/.mllo/external-traces/<source>.jsonl`. Add `--trace-capture-bodies` only
+when you intentionally want redacted request/response bodies stored for local debugging.
 
 ## Architecture
 

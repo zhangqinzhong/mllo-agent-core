@@ -36,6 +36,13 @@ describe("parseMlloCliArgs", () => {
       "43112",
       "--anthropic-upstream",
       "http://127.0.0.1:9000",
+      "--openai-trace-proxy",
+      "--openai-trace-proxy-host",
+      "127.0.0.1",
+      "--openai-trace-proxy-port",
+      "43113",
+      "--openai-upstream",
+      "http://127.0.0.1:9001/v1",
       "--trace-capture-bodies",
     ]);
 
@@ -46,6 +53,10 @@ describe("parseMlloCliArgs", () => {
     expect(parsed.traceProxyHost).toBe("127.0.0.1");
     expect(parsed.traceProxyPort).toBe(43112);
     expect(parsed.anthropicTraceUpstream).toBe("http://127.0.0.1:9000");
+    expect(parsed.openaiTraceProxy).toBe(true);
+    expect(parsed.openaiTraceProxyHost).toBe("127.0.0.1");
+    expect(parsed.openaiTraceProxyPort).toBe(43113);
+    expect(parsed.openaiTraceUpstream).toBe("http://127.0.0.1:9001/v1");
     expect(parsed.traceCaptureBodies).toBe(true);
   });
 
