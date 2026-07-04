@@ -221,6 +221,7 @@ archived_sessions/
 memories/
 skills/
 dump-prompts/
+external-traces/
 ```
 
 ## 可观测性
@@ -240,6 +241,18 @@ MLLO_DUMP_PROMPTS=1
 ```
 
 这个文件适合排查模型协议、工具 schema 膨胀、上下文增长、流式响应错误和异常模型行为。
+
+`mllo observe` 也可以启动一个本地 Anthropic-compatible trace proxy，用来
+调试调用 `/v1/messages` 的外部 agent 或宿主进程：
+
+```sh
+mllo observe --anthropic-trace-proxy --trace-proxy-port 43111
+export ANTHROPIC_BASE_URL=http://127.0.0.1:43111
+```
+
+这个 proxy 会把请求透传到真实上游，同时把脱敏后的摘要写到
+`~/.mllo/external-traces/anthropic.jsonl`。只有明确需要本地保存脱敏后的
+request/response body 时，才加 `--trace-capture-bodies`。
 
 ## 架构
 

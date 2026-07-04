@@ -19,15 +19,30 @@ function waitForAbort(signal: AbortSignal): Promise<void> {
 }
 
 export async function runMlloCliObserve(args: MlloCliObserveCommandArgs): Promise<number> {
-  const { startMlloObserverServer } = await import("../observer");
+  const { startMlloAnthropicTraceProxy, startMlloObserverServer } = await import("../observer");
   const observer = await startMlloObserverServer({
     homePath: args.parsed.homePath,
     host: args.parsed.observerHost,
     port: args.parsed.observerPort,
   });
+  const traceProxy = args.parsed.anthropicTraceProxy
+    ? await startMlloAnthropicTraceProxy({
+        homePath: args.parsed.homePath,
+        host: args.parsed.traceProxyHost,
+        port: args.parsed.traceProxyPort,
+        upstreamBaseUrl: args.parsed.anthropicTraceUpstream,
+        captureBodies: args.parsed.traceCaptureBodies,
+      })
+    : undefined;
   writeCliLine(args.io.stdout, `mllo observer: ${observer.url}`);
+  if (traceProxy !== undefined) {
+    writeCliLine(args.io.stdout, `mllo Anthropic trace proxy: ${traceProxy.url}`);
+    writeCliLine(args.io.stdout, `upstream: ${traceProxy.upstreamBaseUrl}`);
+    writeCliLine(args.io.stdout, `export ANTHROPIC_BASE_URL=${traceProxy.url}`);
+  }
   writeCliLine(args.io.stdout, "Press Ctrl+C to stop.");
   await waitForAbort(args.signal);
+  await traceProxy?.close();
   await observer.close();
   writeCliLine(args.io.stdout, "mllo observer stopped.");
   return 0;

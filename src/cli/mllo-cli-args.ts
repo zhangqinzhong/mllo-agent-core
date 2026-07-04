@@ -26,6 +26,11 @@ type MutableParsedArgs = {
   resumeSessionId?: string;
   observerHost?: string;
   observerPort?: number;
+  anthropicTraceProxy: boolean;
+  traceProxyHost?: string;
+  traceProxyPort?: number;
+  anthropicTraceUpstream?: string;
+  traceCaptureBodies: boolean;
   continueLatest: boolean;
   force: boolean;
   print: boolean;
@@ -199,6 +204,27 @@ function applyOption(args: readonly string[], index: number, parsed: MutablePars
       parsed.observerPort = parsePositiveInt(next.value, flag);
       return next.nextIndex;
     }
+    case "--anthropic-trace-proxy":
+      parsed.anthropicTraceProxy = true;
+      return index;
+    case "--trace-proxy-host": {
+      const next = nextValue();
+      parsed.traceProxyHost = next.value;
+      return next.nextIndex;
+    }
+    case "--trace-proxy-port": {
+      const next = nextValue();
+      parsed.traceProxyPort = parsePositiveInt(next.value, flag);
+      return next.nextIndex;
+    }
+    case "--anthropic-upstream": {
+      const next = nextValue();
+      parsed.anthropicTraceUpstream = next.value;
+      return next.nextIndex;
+    }
+    case "--trace-capture-bodies":
+      parsed.traceCaptureBodies = true;
+      return index;
     case "--session-id": {
       const next = nextValue();
       parsed.sessionId = next.value;
@@ -223,6 +249,8 @@ export function parseMlloCliArgs(
     cwd: process.cwd(),
     outputFormat: "text",
     inputFormat: "text",
+    anthropicTraceProxy: false,
+    traceCaptureBodies: false,
     continueLatest: false,
     force: false,
     print: false,
@@ -267,6 +295,13 @@ export function parseMlloCliArgs(
     ...(parsed.resumeSessionId === undefined ? {} : { resumeSessionId: parsed.resumeSessionId }),
     ...(parsed.observerHost === undefined ? {} : { observerHost: parsed.observerHost }),
     ...(parsed.observerPort === undefined ? {} : { observerPort: parsed.observerPort }),
+    anthropicTraceProxy: parsed.anthropicTraceProxy,
+    ...(parsed.traceProxyHost === undefined ? {} : { traceProxyHost: parsed.traceProxyHost }),
+    ...(parsed.traceProxyPort === undefined ? {} : { traceProxyPort: parsed.traceProxyPort }),
+    ...(parsed.anthropicTraceUpstream === undefined
+      ? {}
+      : { anthropicTraceUpstream: parsed.anthropicTraceUpstream }),
+    traceCaptureBodies: parsed.traceCaptureBodies,
     continueLatest: parsed.continueLatest,
     force: parsed.force,
   };

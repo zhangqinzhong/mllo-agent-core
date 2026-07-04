@@ -53,8 +53,10 @@ export function renderMlloObserverPage(): string {
     .session.active { border-color: #ed9d7d; background: var(--accent-soft); }
     .session-title { font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .session-meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
+    .side-section-title { margin: 18px 0 8px; color: var(--muted); font-size: 12px; font-weight: 650; text-transform: uppercase; }
     .content { padding: 22px 26px; min-width: 0; overflow: auto; }
     .grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 42%); gap: 16px; }
+    .wide-panel { margin-top: 16px; }
     .panel { border: 1px solid var(--border); background: var(--panel); border-radius: 8px; min-width: 0; }
     .panel h2 { margin: 0; padding: 12px 14px; font-size: 14px; border-bottom: 1px solid var(--border); }
     .entries { display: flex; flex-direction: column; gap: 10px; padding: 12px; }
@@ -78,7 +80,10 @@ export function renderMlloObserverPage(): string {
         <button id="refresh">Refresh</button>
         <button id="includeArchived">Archived</button>
       </div>
+      <div class="side-section-title">Sessions</div>
       <div class="sessions" id="sessions"></div>
+      <div class="side-section-title">External Traces</div>
+      <div class="sessions" id="externalTraces"></div>
     </aside>
     <main>
       <header>
@@ -96,11 +101,15 @@ export function renderMlloObserverPage(): string {
             <div class="entries" id="prompts"></div>
           </section>
         </div>
+        <section class="panel wide-panel">
+          <h2 id="externalTraceTitle">External Trace</h2>
+          <div class="entries" id="externalTraceEntries"></div>
+        </section>
       </div>
     </main>
   </div>
   <script>
-    const state = { sessions: [], selectedId: null, includeArchived: false };
+    const state = { sessions: [], traces: [], selectedId: null, selectedTraceSource: null, includeArchived: false };
     const $ = (id) => document.getElementById(id);
     const fmtTime = (ms) => ms ? new Date(ms).toLocaleString() : '-';
     const label = (entry) => [entry.kind || entry.type || 'jsonl', entry.timestamp || ''].filter(Boolean).join(' · ');
@@ -112,7 +121,17 @@ export function renderMlloObserverPage(): string {
       state.sessions = data.sessions || [];
       if (!state.selectedId && state.sessions[0]) state.selectedId = state.sessions[0].id;
       renderSessions();
+      await loadExternalTraces();
       if (state.selectedId) await loadSession(state.selectedId);
+    }
+
+    async function loadExternalTraces() {
+      const response = await fetch('/api/external-traces');
+      const data = await response.json();
+      state.traces = data.traces || [];
+      if (!state.selectedTraceSource && state.traces[0]) state.selectedTraceSource = state.traces[0].source;
+      renderExternalTraceSources();
+      if (state.selectedTraceSource) await loadExternalTrace(state.selectedTraceSource);
     }
 
     function renderSessions() {
@@ -133,6 +152,27 @@ export function renderMlloObserverPage(): string {
       }
     }
 
+    function renderExternalTraceSources() {
+      if (state.traces.length === 0) {
+        $('externalTraces').innerHTML = '<div class="empty">No external traces.</div>';
+        return;
+      }
+      $('externalTraces').innerHTML = state.traces.map((trace) => {
+        const active = trace.source === state.selectedTraceSource ? ' active' : '';
+        return '<button class="session' + active + '" data-source="' + trace.source + '">' +
+          '<div class="session-title">' + escapeHtml(trace.source) + '</div>' +
+          '<div class="session-meta">' + escapeHtml(String(trace.fileBytes)) + ' bytes · ' + fmtTime(trace.updatedAtMs) + '</div>' +
+          '</button>';
+      }).join('');
+      for (const node of document.querySelectorAll('[data-source]')) {
+        node.addEventListener('click', () => {
+          state.selectedTraceSource = node.dataset.source;
+          renderExternalTraceSources();
+          void loadExternalTrace(state.selectedTraceSource);
+        });
+      }
+    }
+
     async function loadSession(id) {
       const response = await fetch('/api/sessions/' + encodeURIComponent(id) + '?limit=300');
       const detail = await response.json();
@@ -141,6 +181,14 @@ export function renderMlloObserverPage(): string {
       $('summary').textContent = [detail.session.cwd, detail.session.model, detail.session.runStatus].filter(Boolean).join(' · ');
       renderEntries('timeline', detail.transcript);
       renderEntries('prompts', detail.prompts);
+    }
+
+    async function loadExternalTrace(source) {
+      const response = await fetch('/api/external-traces/' + encodeURIComponent(source) + '?limit=200');
+      const detail = await response.json();
+      if (!response.ok) return;
+      $('externalTraceTitle').textContent = 'External Trace · ' + source;
+      renderEntries('externalTraceEntries', detail);
     }
 
     function renderEntries(targetId, readResult) {
@@ -180,6 +228,7 @@ export function renderMlloObserverPage(): string {
       $('status').textContent = 'Live · ' + new Date().toLocaleTimeString();
       state.sessions = JSON.parse(event.data).sessions || [];
       renderSessions();
+      void loadExternalTraces();
     });
     events.onerror = () => { $('status').textContent = 'Reconnecting...'; };
     void loadSessions();

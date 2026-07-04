@@ -32,6 +32,11 @@ Options:
       --resume <id>                   Resume a known session id from transcript.
       --host <host>                   Observer host. Defaults to 127.0.0.1.
       --port <port>                   Observer port. Defaults to 43110.
+      --anthropic-trace-proxy         Start a local Anthropic /v1/messages trace proxy.
+      --trace-proxy-host <host>       Trace proxy host. Defaults to 127.0.0.1.
+      --trace-proxy-port <port>       Trace proxy port. Defaults to 43111.
+      --anthropic-upstream <url>      Real Anthropic-compatible upstream. Defaults to https://api.anthropic.com.
+      --trace-capture-bodies          Store redacted request/response bodies in external trace JSONL.
   -c, --continue                      Resume the latest session for --cwd.
   -h, --help                          Show help.
   -v, --version                       Show version.
@@ -40,6 +45,7 @@ Examples:
   mllo config init
   mllo run "summarize this project" --permission-mode auto-readonly
   mllo observe --port 43110
+  mllo observe --anthropic-trace-proxy --trace-proxy-port 43111
   mllo -p --output-format stream-json "inspect package.json"
 `;
 }

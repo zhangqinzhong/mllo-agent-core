@@ -249,6 +249,7 @@ archived_sessions/
 memories/
 skills/
 dump-prompts/
+external-traces/
 ```
 
 ## Observability
@@ -270,6 +271,19 @@ Dumped requests and responses are written to:
 
 Use this when diagnosing provider protocol issues, tool schema bloat, context
 growth, streaming errors, or unexpected model behavior.
+
+`mllo observe` can also start a local Anthropic-compatible trace proxy for
+debugging another agent or host process that calls `/v1/messages`:
+
+```sh
+mllo observe --anthropic-trace-proxy --trace-proxy-port 43111
+export ANTHROPIC_BASE_URL=http://127.0.0.1:43111
+```
+
+The proxy forwards requests to the real upstream and writes redacted summaries
+to `~/.mllo/external-traces/anthropic.jsonl`. Add `--trace-capture-bodies` only
+when you intentionally want redacted request/response bodies stored for local
+debugging.
 
 ## Architecture
 

@@ -28,6 +28,11 @@ export type MlloCliParsedArgs = {
   resumeSessionId?: string;
   observerHost?: string;
   observerPort?: number;
+  anthropicTraceProxy: boolean;
+  traceProxyHost?: string;
+  traceProxyPort?: number;
+  anthropicTraceUpstream?: string;
+  traceCaptureBodies: boolean;
   continueLatest: boolean;
   force: boolean;
 };

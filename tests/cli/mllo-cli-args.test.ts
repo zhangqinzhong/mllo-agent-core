@@ -23,11 +23,30 @@ describe("parseMlloCliArgs", () => {
   });
 
   it("parses observe command options", () => {
-    const parsed = parseMlloCliArgs(["observe", "--host", "127.0.0.1", "--port", "43111"]);
+    const parsed = parseMlloCliArgs([
+      "observe",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      "43111",
+      "--anthropic-trace-proxy",
+      "--trace-proxy-host",
+      "127.0.0.1",
+      "--trace-proxy-port",
+      "43112",
+      "--anthropic-upstream",
+      "http://127.0.0.1:9000",
+      "--trace-capture-bodies",
+    ]);
 
     expect(parsed.command).toBe("observe");
     expect(parsed.observerHost).toBe("127.0.0.1");
     expect(parsed.observerPort).toBe(43111);
+    expect(parsed.anthropicTraceProxy).toBe(true);
+    expect(parsed.traceProxyHost).toBe("127.0.0.1");
+    expect(parsed.traceProxyPort).toBe(43112);
+    expect(parsed.anthropicTraceUpstream).toBe("http://127.0.0.1:9000");
+    expect(parsed.traceCaptureBodies).toBe(true);
   });
 
   it("parses latest-session resume", () => {

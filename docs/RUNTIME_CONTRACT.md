@@ -87,7 +87,19 @@ JSONL transcript 是会话事实来源。
 - 不混进主 transcript。
 - observer 展示前必须脱敏常见 secret 字段。
 
-### 4.1 Project Instructions
+### 4.1 External Traces
+
+`external-traces/<source>.jsonl` 是 observer 捕获外部 agent 或外部宿主进程流量的事实记录。
+
+稳定要求：
+
+- 默认不开启本地代理；宿主或 CLI 必须显式打开。
+- trace proxy 必须透传请求，不能参与 agent 决策。
+- 默认只保存请求/响应摘要；保存 body 必须由用户显式开启。
+- 写入前和展示前都必须脱敏常见 secret 字段。
+- external trace 不能混进 session transcript，也不能进入模型上下文。
+
+### 4.2 Project Instructions
 
 `AGENTS.md` 是项目指令文件，由 core 负责发现并注入 prompt context。`AGENTS.override.md` 是同目录本地覆盖文件，优先级高于 `AGENTS.md`。
 
