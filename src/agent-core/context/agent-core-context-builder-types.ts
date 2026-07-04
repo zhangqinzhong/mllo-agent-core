@@ -26,6 +26,7 @@ import type { AgentCoreRunSandboxPolicy } from "../runtime/agent-core-run-sandbo
 import type { MlloRuntimeHomeOptions } from "../runtime-home/mllo-runtime-home-types";
 import type { AgentCorePromptProfile } from "./agent-core-prompt-profile";
 import type { AgentCoreMiddleware } from "../middleware/agent-core-middleware-types";
+import type { AgentCoreToolExposureMode } from "../tools/agent-core-tool-exposure";
 
 export type AgentCoreContextBuilderOptions = {
   cwd: string;
@@ -57,6 +58,7 @@ export type AgentCoreContextBuilderOptions = {
   toolAvailabilityNowMs?: number;
   shellExecutionBackend?: AgentCoreShellExecutionBackend;
   requireSandboxedShell?: boolean;
+  toolExposureMode?: AgentCoreToolExposureMode;
 };
 
 export type AgentCoreBuiltContext = {

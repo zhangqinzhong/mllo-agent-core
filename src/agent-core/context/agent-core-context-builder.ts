@@ -7,6 +7,7 @@ import type {
 import type { AgentCoreQueryLoopArgs } from "../query-loop/agent-core-query-types";
 import { createAgentCoreBaseTools } from "../tools/agent-core-base-tools";
 import { localAgentCoreShellExecutionBackend } from "../tools/shell-execution-backend";
+import { applyAgentCoreToolExposure } from "../tools/agent-core-tool-exposure";
 import {
   defaultAgentCoreToolAvailabilityCache,
   resolveAgentCoreToolAvailability,
@@ -209,7 +210,10 @@ export async function buildAgentCoreContext(
     cache: options.toolAvailabilityCache ?? defaultAgentCoreToolAvailabilityCache,
     nowMs: options.toolAvailabilityNowMs,
   });
-  const tools = toolAvailability.tools;
+  const tools = applyAgentCoreToolExposure({
+    tools: toolAvailability.tools,
+    mode: options.toolExposureMode ?? "deferred",
+  });
   const resume = await maybeResumeAgentCoreContextSession(options.session);
   const messages = combineAgentCoreContextMessages(resume, options.newMessages);
   const promptContext = await buildAgentCorePromptContext({

@@ -102,6 +102,13 @@ function renderContinuation(
   return `[mllo] continue: ${event.continuation.reason}`;
 }
 
+function renderTerminal(event: Extract<AgentCoreQueryEvent, { type: "terminal" }>): string | null {
+  if (event.terminal.reason === "completed") {
+    return null;
+  }
+  return `[mllo] terminal: ${event.terminal.reason}`;
+}
+
 export class MlloCliEventRenderer {
   private readonly outputFormat: MlloCliOutputFormat;
   private readonly stdout: Writable;
@@ -173,6 +180,13 @@ export class MlloCliEventRenderer {
     switch (event.type) {
       case "continue": {
         const line = renderContinuation(event);
+        if (line !== null) {
+          writeCliLine(this.stderr, line);
+        }
+        return;
+      }
+      case "terminal": {
+        const line = renderTerminal(event);
         if (line !== null) {
           writeCliLine(this.stderr, line);
         }

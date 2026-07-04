@@ -40,6 +40,7 @@ host application
 - 保持已有事件字段向后兼容。
 - 为新事件补测试。
 - 明确宿主应用在未知事件下可以安全忽略。
+- 每次 query loop 结束必须产生 `terminal` event；`terminal.reason` 是比 `status` 更细的结束原因，测试和 observer 应优先用它判断恢复、失败和等待路径。
 
 ### 2. Session Transcript
 
@@ -155,6 +156,7 @@ JSONL transcript 是会话事实来源。
 - 当 runtime 提供 blob store 时，被共享预算裁剪的 `tool_result` 必须保留 `outputBlobPath` 和 `outputBlobBytes`，并在模型可见正文中渲染 `<mllo_persisted_tool_output>` 块；完整输出不能静默丢失。
 - 每轮工具批次完成后可以产生 `tool-batch-summary` timeline event；默认应调用 summary model 生成短 label，失败时降级到确定性 label；event 只能保存 label、tool id/name、状态、错误类别和截断/blob 元数据，不能复制原始 tool input 或 output。
 - 每次 query loop 决定再次进入模型调用时必须产生 `continue` timeline event，并用 `continuation.reason` 区分 `next_turn`、`stop_hook_blocking`、`reactive_compact_retry`、permission/elicitation resume 等路径；宿主 UI 可以忽略该事件，但 JSONL/observer 必须保留它。
+- 工具暴露必须支持 `direct` 和 `deferred` 两种模式；`deferred` 模式下长尾工具不能直接塞进模型 tool schema，必须通过 `search_deferred_tools` 和 `call_deferred_tool` 两步访问，降低工具 schema token 和注意力成本。
 - 同一 autonomous loop 内已失败的同名同参工具调用再次出现时必须生成 repeated-failure，而不是再次执行。
 - 权限拒绝必须写成带错误分类的 tool_result；即使 run 进入 denied 终态，也不能留下未闭合的 tool call。
 - query loop 入口和 session resume 都必须修复缺失或错位的 tool_result，不能把悬空 tool_call 发送给模型端点。

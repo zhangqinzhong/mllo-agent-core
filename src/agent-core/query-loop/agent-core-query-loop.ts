@@ -301,6 +301,11 @@ export async function* runAgentCoreQueryLoop(
       status: "error",
       messages,
       message,
+      terminal: {
+        reason: "max_turns",
+        turnCount: maxTurns,
+        message,
+      },
     });
   } catch (error) {
     await middlewareChain.onError({

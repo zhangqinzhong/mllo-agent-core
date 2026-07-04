@@ -48,6 +48,9 @@ describe("agent core continuation events", () => {
     );
 
     expect(result.status).toBe("completed");
+    expect(result.terminal).toEqual({
+      reason: "completed",
+    });
     expect(events).toContainEqual({
       type: "continue",
       continuation: {
@@ -55,6 +58,13 @@ describe("agent core continuation events", () => {
       },
       turn: 1,
       messageCount: 3,
+    });
+    expect(events).toContainEqual({
+      type: "terminal",
+      terminal: {
+        reason: "completed",
+      },
+      messageCount: 4,
     });
   });
 
@@ -84,6 +94,11 @@ describe("agent core continuation events", () => {
     );
 
     expect(result.status).toBe("error");
+    expect(result.terminal).toEqual({
+      reason: "max_turns",
+      turnCount: 2,
+      message: "Agent run exceeded maxTurns=2.",
+    });
     expect(events).toContainEqual({
       type: "continue",
       continuation: {
@@ -91,6 +106,15 @@ describe("agent core continuation events", () => {
       },
       turn: 1,
       messageCount: 2,
+    });
+    expect(events).toContainEqual({
+      type: "terminal",
+      terminal: {
+        reason: "max_turns",
+        turnCount: 2,
+        message: "Agent run exceeded maxTurns=2.",
+      },
+      messageCount: 3,
     });
   });
 });

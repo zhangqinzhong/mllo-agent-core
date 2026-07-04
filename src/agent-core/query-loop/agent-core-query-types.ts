@@ -19,6 +19,7 @@ import type { AgentCoreToolBatchSummary } from "./agent-core-tool-batch-summary"
 import type { AgentCorePromptBlock } from "./agent-core-prompt-block-types";
 import type { AgentCoreModelUsage } from "../model/agent-core-model-usage";
 import type { AgentCoreContinuationEvent } from "./agent-core-continuation";
+import type { AgentCoreTerminal, AgentCoreTerminalEvent } from "./agent-core-terminal";
 
 // Query loop 内部消息格式。它先保持模型无关，后续再由 adapter 转成具体模型协议格式。
 export type AgentCoreMessage =
@@ -124,6 +125,7 @@ export type AgentCoreQueryLoopArgs = {
 export type AgentCoreQueryEvent =
   | AgentCoreHookEvent
   | AgentCoreContinuationEvent
+  | AgentCoreTerminalEvent
   | {
       type: "turn-start";
       turn: number;
@@ -188,33 +190,39 @@ export type AgentCoreQueryLoopResult =
   | {
       status: "completed";
       messages: AgentCoreMessage[];
+      terminal?: AgentCoreTerminal;
     }
   | {
       status: "waiting-for-permission";
       messages: AgentCoreMessage[];
       call: AgentCoreToolCall;
       decision: AgentCorePermissionDecision;
+      terminal?: AgentCoreTerminal;
     }
   | {
       status: "waiting-for-elicitation";
       messages: AgentCoreMessage[];
       call: AgentCoreToolCall;
       request: AgentCoreElicitationRequest;
+      terminal?: AgentCoreTerminal;
     }
   | {
       status: "denied";
       messages: AgentCoreMessage[];
       call: AgentCoreToolCall;
       decision: AgentCorePermissionDecision;
+      terminal?: AgentCoreTerminal;
     }
   | {
       status: "stopped";
       messages: AgentCoreMessage[];
       reason: string;
+      terminal?: AgentCoreTerminal;
     }
   | {
       status: "error";
       messages: AgentCoreMessage[];
       message: string;
       errorCode?: AgentCoreModelErrorCode;
+      terminal?: AgentCoreTerminal;
     };

@@ -74,6 +74,7 @@ export type {
   AgentCoreContinuation,
   AgentCoreContinuationEvent,
 } from "../query-loop/agent-core-continuation";
+export type { AgentCoreTerminal, AgentCoreTerminalEvent } from "../query-loop/agent-core-terminal";
 export type {
   AgentCoreQueryEvent,
   AgentCoreQueryLoopResult,

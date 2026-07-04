@@ -1,37 +1,49 @@
-import { finishWithSessionEndHooks } from './agent-core-lifecycle-hooks'
-import type { AgentCoreMiddlewareChain } from '../middleware/agent-core-middleware-chain'
+import { finishWithSessionEndHooks } from "./agent-core-lifecycle-hooks";
+import {
+  createAgentCoreTerminalEvent,
+  createAgentCoreTerminalFromResult,
+  withAgentCoreTerminal,
+} from "./agent-core-terminal";
+import type { AgentCoreMiddlewareChain } from "../middleware/agent-core-middleware-chain";
 import type {
   AgentCoreMessage,
   AgentCoreQueryEvent,
   AgentCoreQueryLoopArgs,
-  AgentCoreQueryLoopResult
-} from './agent-core-query-types'
+  AgentCoreQueryLoopResult,
+} from "./agent-core-query-types";
 
 export function isAgentCoreQueryStopped(signal: AbortSignal | undefined): boolean {
-  return signal?.aborted === true
+  return signal?.aborted === true;
 }
 
 export function createStoppedAgentCoreQueryLoopResult(
   messages: AgentCoreMessage[],
-  reason: string
+  reason: string,
 ): AgentCoreQueryLoopResult {
   return {
-    status: 'stopped',
+    status: "stopped",
     messages,
-    reason
-  }
+    reason,
+  };
 }
 
 export async function* finishAgentCoreQueryLoopResult(args: {
-  queryArgs: AgentCoreQueryLoopArgs
-  messages: AgentCoreMessage[]
-  middlewareChain: AgentCoreMiddlewareChain
-  result: AgentCoreQueryLoopResult
+  queryArgs: AgentCoreQueryLoopArgs;
+  messages: AgentCoreMessage[];
+  middlewareChain: AgentCoreMiddlewareChain;
+  result: AgentCoreQueryLoopResult;
 }): AsyncGenerator<AgentCoreQueryEvent, AgentCoreQueryLoopResult> {
   const middlewareResult = await args.middlewareChain.afterAgent({
     queryArgs: args.queryArgs,
     messages: args.messages,
-    result: args.result
-  })
-  return yield* finishWithSessionEndHooks(args.queryArgs, middlewareResult)
+    result: args.result,
+  });
+  const hookedResult = yield* finishWithSessionEndHooks(args.queryArgs, middlewareResult);
+  const terminal = hookedResult.terminal ?? createAgentCoreTerminalFromResult(hookedResult);
+  const result = withAgentCoreTerminal(hookedResult, terminal);
+  yield createAgentCoreTerminalEvent({
+    result,
+    terminal,
+  });
+  return result;
 }

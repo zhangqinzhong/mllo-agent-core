@@ -15,6 +15,7 @@ export type {
   AgentCoreContinuation,
   AgentCoreContinuationEvent,
 } from "./query-loop/agent-core-continuation";
+export type { AgentCoreTerminal, AgentCoreTerminalEvent } from "./query-loop/agent-core-terminal";
 export {
   AGENT_CORE_PERSISTED_TOOL_OUTPUT_TAG,
   AGENT_CORE_TOOL_RESULTS_PER_TURN_MAX_CHARS,
@@ -74,6 +75,7 @@ export type {
   AgentCoreToolProgress,
   AgentCoreToolResult,
 } from "./tools/agent-core-tool-types";
+export type { AgentCoreToolExposureMode } from "./tools/agent-core-tool-exposure";
 export {
   readAgentCoreToolResultBlob,
   writeAgentCoreToolResultBlob,
