@@ -47,7 +47,9 @@ export type {
 export {
   approveMlloCommandHookTrustedHash,
   listMlloCommandHooks,
+  readMlloAgentCoreConfig,
   saveMlloCommandHookConfig,
+  writeMlloAgentCoreConfig,
 } from "../model/agent-core-mllo-config";
 export type {
   MlloAgentCoreConfig,
