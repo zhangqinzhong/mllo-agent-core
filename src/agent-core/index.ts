@@ -114,6 +114,16 @@ export type {
 
 export { createAgentCoreHttpModelAdapter } from "./model/agent-core-http-model-adapter";
 export type { AgentCoreHttpModelConfig } from "./model/agent-core-http-model-config";
+export type {
+  AgentCoreLangfuseCaptureContent,
+  AgentCoreLangfuseMaskFunction,
+  AgentCoreLangfuseTracingOptions,
+} from "./observability/agent-core-langfuse-options";
+export {
+  flushAgentCoreLangfuseRuntime,
+  resolveAgentCoreLangfuseTracing,
+  shutdownAgentCoreLangfuseRuntime,
+} from "./observability/agent-core-langfuse-runtime";
 
 export type {
   AgentCoreMcpClient,

@@ -162,9 +162,10 @@ export function createAgentCoreGlobFilesTool(
 ): AgentCoreToolDefinition {
   return {
     name: "glob_files",
-    description: "Find workspace files by glob pattern, supporting *, ?, and **.",
+    description:
+      "Find workspace files by glob pattern, supporting *, ?, and **. Use this for filename discovery; use grep_files for content search.",
     inputSchema: globFilesInputSchema,
-    maxResultSizeChars: 80_000,
+    maxResultSizeChars: 20_000,
     evaluatePermission(input) {
       const parsed = globFilesInputSchema.safeParse(input);
       return parsed.success

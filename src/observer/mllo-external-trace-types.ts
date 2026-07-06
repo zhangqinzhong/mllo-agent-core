@@ -69,6 +69,7 @@ export type MlloExternalTraceLogReadOptions = MlloExternalTraceJsonlOptions & {
 export type MlloAnthropicTraceProxyOptions = MlloExternalTraceJsonlOptions & {
   host?: string;
   port?: number;
+  source?: MlloExternalTraceSource;
   upstreamBaseUrl?: string;
   redactSecrets?: boolean;
   captureBodies?: boolean;
@@ -85,6 +86,7 @@ export type MlloAnthropicTraceProxyHandle = {
 export type MlloOpenAITraceProxyOptions = MlloExternalTraceJsonlOptions & {
   host?: string;
   port?: number;
+  source?: MlloExternalTraceSource;
   upstreamBaseUrl?: string;
   redactSecrets?: boolean;
   captureBodies?: boolean;

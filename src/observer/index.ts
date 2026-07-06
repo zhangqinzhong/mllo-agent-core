@@ -8,6 +8,17 @@ export {
   listMlloExternalTraceLogs,
   readMlloExternalTraceLog,
 } from "./mllo-external-trace-jsonl";
+export {
+  createMlloExternalTraceLangfuseGeneration,
+  exportMlloExternalTraceLogsToLangfuse,
+  exportMlloExternalTraceRecordToLangfuse,
+} from "./mllo-external-trace-langfuse";
+export type {
+  MlloExternalTraceLangfuseExportOptions,
+  MlloExternalTraceLangfuseExportResult,
+  MlloExternalTraceLangfuseGeneration,
+  MlloExternalTraceLangfuseWriter,
+} from "./mllo-external-trace-langfuse";
 export { listMlloObserverSessions, readMlloObserverSessionDetail } from "./mllo-observer-sessions";
 export type {
   MlloAnthropicTraceProxyHandle,

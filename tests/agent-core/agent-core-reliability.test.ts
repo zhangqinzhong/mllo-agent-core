@@ -382,15 +382,23 @@ describe("agent core reliability guards", () => {
     expect(result.status).toBe("completed");
     const toolMessages = result.messages.filter((message) => message.role === "tool");
     expect(toolMessages).toHaveLength(3);
-    expect(toolMessages[0]?.content.length).toBe(150_000);
+    expect(toolMessages[0]?.content).toContain(`<${AGENT_CORE_PERSISTED_TOOL_OUTPUT_TAG}>`);
+    expect(toolMessages[0]?.content).toContain("toolCallId: call_first");
+    expect(toolMessages[0]?.content).toContain("outputBlobPath: blob/call_first.json");
+    expect(toolMessages[0]?.content).toContain("keptChars: 80000");
     expect(toolMessages[1]?.content).toContain(`<${AGENT_CORE_PERSISTED_TOOL_OUTPUT_TAG}>`);
     expect(toolMessages[1]?.content).toContain("toolCallId: call_second");
     expect(toolMessages[1]?.content).toContain("outputBlobPath: blob/call_second.json");
-    expect(toolMessages[1]?.content).toContain("keptChars: 50000");
-    expect(toolMessages[1]?.content).toContain("Preview:\n");
+    expect(toolMessages[1]?.content).toContain("keptChars: 0");
+    expect(toolMessages[1]?.content).toContain("(no preview retained in this message)");
     expect(toolMessages[2]?.content).toContain("keptChars: 0");
     expect(toolMessages[2]?.content).toContain("outputBlobPath: blob/call_third.json");
     expect(toolMessages[2]?.content).toContain("(no preview retained in this message)");
+    expect(toolMessages[0]).toMatchObject({
+      outputTruncated: true,
+      outputOriginalChars: 150_000,
+      outputBlobPath: "blob/call_first.json",
+    });
     expect(toolMessages[1]).toMatchObject({
       outputTruncated: true,
       outputOriginalChars: 90_000,
@@ -402,6 +410,11 @@ describe("agent core reliability guards", () => {
       outputBlobPath: "blob/call_third.json",
     });
     expect(storedBlobs).toEqual([
+      {
+        toolCallId: "call_first",
+        content: "a".repeat(150_000),
+        originalChars: 150_000,
+      },
       {
         toolCallId: "call_second",
         content: "b".repeat(90_000),

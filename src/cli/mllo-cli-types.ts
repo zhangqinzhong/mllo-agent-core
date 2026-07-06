@@ -29,14 +29,18 @@ export type MlloCliParsedArgs = {
   observerHost?: string;
   observerPort?: number;
   anthropicTraceProxy: boolean;
+  anthropicTraceSource?: string;
   traceProxyHost?: string;
   traceProxyPort?: number;
   anthropicTraceUpstream?: string;
   openaiTraceProxy: boolean;
+  openaiTraceSource?: string;
   openaiTraceProxyHost?: string;
   openaiTraceProxyPort?: number;
   openaiTraceUpstream?: string;
   traceCaptureBodies: boolean;
+  langfuseExportExternalTraces: boolean;
+  langfuseExportIntervalMs?: number;
   continueLatest: boolean;
   force: boolean;
 };

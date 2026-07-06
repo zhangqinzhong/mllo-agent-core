@@ -142,11 +142,11 @@ describe("mllo external trace", () => {
       });
 
       const logs = await waitForTraceLogs(homePath);
-      expect(logs.map((log) => log.source)).toEqual(["anthropic"]);
+      expect(logs.map((log) => log.source)).toEqual(["mllo"]);
 
       const trace = await readMlloExternalTraceLog({
         homePath,
-        source: "anthropic",
+        source: "mllo",
         redactSecrets: true,
       });
       expect(trace.exists).toBe(true);
@@ -302,10 +302,10 @@ describe("mllo external trace", () => {
       expect(response.status).toBe(200);
       expect(upstreamPath).toBe("/v1/chat/completions?debug=1");
       const logs = await waitForTraceLogs(homePath);
-      expect(logs.map((log) => log.source)).toEqual(["openai"]);
+      expect(logs.map((log) => log.source)).toEqual(["mllo"]);
       const trace = await readMlloExternalTraceLog({
         homePath,
-        source: "openai",
+        source: "mllo",
         redactSecrets: true,
       });
       const record = trace.entries[0]?.parsed as Record<string, unknown>;
@@ -390,7 +390,7 @@ describe("mllo external trace", () => {
       await waitForTraceLogs(homePath);
       const trace = await readMlloExternalTraceLog({
         homePath,
-        source: "openai",
+        source: "mllo",
       });
       const record = trace.entries[0]?.parsed as Record<string, unknown>;
       expect(record.response).toMatchObject({

@@ -33,14 +33,20 @@ Options:
       --host <host>                   Observer host. Defaults to 127.0.0.1.
       --port <port>                   Observer port. Defaults to 43110.
       --anthropic-trace-proxy         Start a local Anthropic /v1/messages trace proxy.
+      --anthropic-trace-source <src>  External trace source. Defaults to mllo; use claude-code for Claude Code.
       --trace-proxy-host <host>       Trace proxy host. Defaults to 127.0.0.1.
       --trace-proxy-port <port>       Trace proxy port. Defaults to 43111.
       --anthropic-upstream <url>      Real Anthropic-compatible upstream. Defaults to https://api.anthropic.com.
       --openai-trace-proxy            Start a local OpenAI-compatible trace proxy.
+      --openai-trace-source <src>     External trace source. Defaults to mllo; use codex-cli for Codex CLI.
       --openai-trace-proxy-host <h>   OpenAI trace proxy host. Defaults to 127.0.0.1.
       --openai-trace-proxy-port <p>   OpenAI trace proxy port. Defaults to 43112.
       --openai-upstream <url>         Real OpenAI-compatible upstream. Defaults to https://api.openai.com.
       --trace-capture-bodies          Store redacted request/response bodies in external trace JSONL.
+      --langfuse-export-external-traces
+                                      Export external trace JSONL records to Langfuse generations.
+      --langfuse-export-interval-ms <n>
+                                      External trace Langfuse export interval. Defaults to 2000.
   -c, --continue                      Resume the latest session for --cwd.
   -h, --help                          Show help.
   -v, --version                       Show version.
@@ -50,6 +56,7 @@ Examples:
   mllo run "summarize this project" --permission-mode auto-readonly
   mllo observe --port 43110
   mllo observe --anthropic-trace-proxy --trace-proxy-port 43111
+  mllo observe --anthropic-trace-proxy --anthropic-trace-source claude-code --trace-capture-bodies --langfuse-export-external-traces
   mllo observe --openai-trace-proxy --openai-trace-proxy-port 43112
   mllo -p --output-format stream-json "inspect package.json"
 `;

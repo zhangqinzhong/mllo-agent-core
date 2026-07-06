@@ -38,7 +38,9 @@ export function createAgentCoreSystemPolicy(): AgentCoreSystemPolicy {
         title: "Tool Protocol",
         bullets: [
           "Use read-only tools before write tools when context is incomplete.",
+          "For code search, prefer grep_files with outputMode=files_with_matches or one bounded read-only shell_command using rg/git grep before reading files.",
           "Prefer targeted searches and file reads over broad scans when the target is known.",
+          "Do not loop through many near-duplicate searches. If two searches point to the same files, read the best evidence and answer.",
           "Treat tool errors as recoverable information and continue only when the state is clear.",
           "If tool input schema validation fails, repair the JSON arguments and call that tool again.",
           "For write tools, preserve user changes, respect stale-write checks, and avoid overwriting unrelated dirty files.",

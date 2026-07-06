@@ -4,7 +4,7 @@ import type {
   AgentCoreToolResultBlobStore,
 } from "./agent-core-query-types";
 
-export const AGENT_CORE_TOOL_RESULTS_PER_TURN_MAX_CHARS = 200_000;
+export const AGENT_CORE_TOOL_RESULTS_PER_TURN_MAX_CHARS = 80_000;
 export const AGENT_CORE_PERSISTED_TOOL_OUTPUT_TAG = "mllo_persisted_tool_output";
 
 export type AgentCoreToolResultTurnBudget = {

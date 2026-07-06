@@ -24,6 +24,7 @@ import type {
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 43111;
 const DEFAULT_UPSTREAM_BASE_URL = "https://api.anthropic.com";
+const DEFAULT_SOURCE = "mllo";
 const DEFAULT_MAX_BUFFERED_REQUEST_BYTES = 64 * 1024 * 1024;
 const DEFAULT_MAX_CAPTURED_RESPONSE_BYTES = 8 * 1024 * 1024;
 
@@ -132,7 +133,7 @@ async function handleProxyRequest(
           type: "external_trace",
           schemaVersion: 1,
           id: traceId,
-          source: "anthropic",
+          source: options.source ?? DEFAULT_SOURCE,
           protocol: "anthropic",
           startedAt,
           completedAt: new Date().toISOString(),
@@ -167,7 +168,7 @@ async function handleProxyRequest(
         type: "external_trace",
         schemaVersion: 1,
         id: traceId,
-        source: "anthropic",
+        source: options.source ?? DEFAULT_SOURCE,
         protocol: "anthropic",
         startedAt,
         completedAt: new Date().toISOString(),

@@ -10,7 +10,7 @@ import type { AgentCoreToolDefinition } from "./agent-core-tool-types";
 import { createAgentCoreToolInputValidationResult } from "./agent-core-tool-input-validation";
 import type { AgentCoreProjectInstructionWriteGuard } from "./agent-core-project-instruction-write-guard";
 
-const DEFAULT_MAX_READ_BYTES = 200_000;
+const DEFAULT_MAX_READ_BYTES = 80_000;
 const DEFAULT_MAX_DIRECTORY_ENTRIES = 200;
 const readFileInputSchema = z.object({
   path: z.string().min(1).describe("Workspace-relative path of the UTF-8 text file to read."),
@@ -90,7 +90,8 @@ export function createAgentCoreReadFileTool(
 ): AgentCoreToolDefinition {
   return {
     name: "read_file",
-    description: "Read a UTF-8 text file from the workspace.",
+    description:
+      "Read a UTF-8 text file from the workspace. Prefer targeted reads with maxBytes after locating relevant files.",
     inputSchema: readFileInputSchema,
     maxResultSizeChars: options.maxReadBytes ?? DEFAULT_MAX_READ_BYTES,
     evaluatePermission(input) {
@@ -145,9 +146,10 @@ export function createAgentCoreListDirectoryTool(
 ): AgentCoreToolDefinition {
   return {
     name: "list_dir",
-    description: "List files and directories in a workspace directory.",
+    description:
+      "List files and directories in one workspace directory. Use glob_files or grep_files for codebase-wide discovery.",
     inputSchema: listDirectoryInputSchema,
-    maxResultSizeChars: 50_000,
+    maxResultSizeChars: 20_000,
     evaluatePermission(input) {
       const parsed = listDirectoryInputSchema.safeParse(input);
       return parsed.success

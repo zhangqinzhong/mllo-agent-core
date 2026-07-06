@@ -56,6 +56,11 @@ import {
   persistedAgentCoreRunResumeMessageCount,
 } from "./agent-core-run-context-metadata";
 import { buildAgentCoreRunContext } from "./agent-core-run-build-context";
+import {
+  createAgentCoreLangfuseRunTrace,
+  finishAgentCoreLangfuseRunTrace,
+  type AgentCoreLangfuseRunTrace,
+} from "../observability/agent-core-langfuse-run-trace";
 // 运行一次 Agent Core 对话。它串起 provider、context、tools、session 和 query loop。
 export async function* runAgentCoreController(
   options: AgentCoreRunControllerOptions,
@@ -71,6 +76,9 @@ export async function* runAgentCoreController(
     clients: [],
     ownedClients: [],
   };
+  let langfuseTrace: AgentCoreLangfuseRunTrace | undefined;
+  let finalResult: AgentCoreRunControllerResult | undefined;
+  let finalError: unknown;
   try {
     await appendAgentCoreInputHistoryEntry({
       configDir: options.session.configDir,
@@ -80,6 +88,14 @@ export async function* runAgentCoreController(
     });
     const loadedConfig = await loadAgentCoreRunConfig(options);
     const provider = loadAgentCoreRunModelProvider(options, loadedConfig);
+    langfuseTrace = await createAgentCoreLangfuseRunTrace({
+      options: options.observability?.langfuse,
+      sessionId: session.handle.sessionId,
+      cwd,
+      workspaceRoots,
+      input: options.input,
+      provider,
+    });
     const runtimeHome = {
       homePath: options.session.configDir,
     };
@@ -100,6 +116,7 @@ export async function* runAgentCoreController(
       provider,
       session,
       fetchImpl: options.fetchImpl,
+      langfuseTrace,
     });
     mcpClientResolution = await resolveAgentCoreRunMcpClients({
       cwd,
@@ -372,10 +389,11 @@ export async function* runAgentCoreController(
       }
       if (result.status !== "waiting-for-permission" || options.onPermissionRequest === undefined) {
         await syncThreadState(result);
-        return {
+        finalResult = {
           ...result,
           session: session.handle,
         };
+        return finalResult;
       }
       let permissionResult: Extract<
         AgentCoreQueryLoopResult,
@@ -423,15 +441,27 @@ export async function* runAgentCoreController(
           continue;
         }
         await syncThreadState(resumeResult);
-        return {
+        finalResult = {
           ...resumeResult,
           session: session.handle,
         };
+        return finalResult;
       }
     }
+  } catch (error) {
+    finalError = error;
+    throw error;
   } finally {
     try {
-      await closeAgentCoreRunMcpClients(mcpClientResolution.ownedClients);
+      try {
+        await finishAgentCoreLangfuseRunTrace({
+          trace: langfuseTrace,
+          result: finalResult,
+          error: finalError,
+        });
+      } finally {
+        await closeAgentCoreRunMcpClients(mcpClientResolution.ownedClients);
+      }
     } finally {
       if (session.ownsStateStore) {
         session.stateStore.close();

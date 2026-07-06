@@ -169,6 +169,8 @@ export function createAgentCoreShellCommandTool(
     name: "shell_command",
     description: [
       "Run a shell command in the workspace with streaming output, timeout, and optional background execution.",
+      "For repository investigation, prefer one bounded read-only command such as rg, grep, find, sed, git status, or git grep over many small file tools.",
+      'Keep search output narrow, for example `rg -n "pattern" src --glob "*.ts" | head -80` before targeted read_file calls.',
       "Set description to a short active-voice explanation of the command intent for permission review.",
       `Execution backend: ${describeAgentCoreShellExecutionBackend(executionBackend)}.`,
       sandboxRequirement,
