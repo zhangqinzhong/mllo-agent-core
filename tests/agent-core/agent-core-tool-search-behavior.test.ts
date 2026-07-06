@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { evaluateAgentCoreShellPermission } from "../../src/agent-core/permissions/shell-command-policy";
 import type { AgentCorePermissionContext } from "../../src/agent-core/permissions/agent-core-permission-types";
 import { createAgentCoreGrepFilesTool } from "../../src/agent-core/tools/agent-core-grep-files-tool";
+import { resolveAgentCoreRipgrepConfig } from "../../src/agent-core/tools/agent-core-ripgrep-search";
 
 async function writeText(path: string, content: string): Promise<void> {
   await mkdir(dirname(path), {
@@ -58,6 +59,38 @@ describe("agent core search tool behavior", () => {
     expect(decision).toMatchObject({
       status: "allow",
       capability: "shell-readonly",
+    });
+  });
+
+  it("prefers vendored ripgrep and falls back to system ripgrep when builtin is unavailable", () => {
+    expect(
+      resolveAgentCoreRipgrepConfig({
+        builtinPath: join(process.cwd(), "package.json"),
+        systemAvailable: true,
+      }),
+    ).toMatchObject({
+      mode: "builtin",
+    });
+
+    expect(
+      resolveAgentCoreRipgrepConfig({
+        builtinPath: "/tmp/mllo-rg-test-missing",
+        systemAvailable: true,
+      }),
+    ).toMatchObject({
+      mode: "system",
+      command: "rg",
+    });
+
+    expect(
+      resolveAgentCoreRipgrepConfig({
+        builtinPath: join(process.cwd(), "package.json"),
+        systemAvailable: true,
+        useBuiltinRipgrep: "0",
+      }),
+    ).toMatchObject({
+      mode: "system",
+      command: "rg",
     });
   });
 });

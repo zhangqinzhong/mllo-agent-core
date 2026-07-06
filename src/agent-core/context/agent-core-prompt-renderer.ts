@@ -307,8 +307,10 @@ function renderSessionState(context: AgentCorePromptContext): string {
 // 渲染预算状态。真正 compact engine 后续会填充 token 和 compact 信息。
 function renderBudgetState(context: AgentCorePromptContext): string {
   return [
+    `contextWindowTokens: ${context.budget.contextWindowTokens ?? "unset"}`,
     `inputBudgetTokens: ${context.budget.inputBudgetTokens ?? "unset"}`,
     `outputBudgetTokens: ${context.budget.outputBudgetTokens ?? "unset"}`,
+    `compactThresholdTokens: ${context.budget.compactThresholdTokens ?? "unset"}`,
     `estimatedInputTokens: ${context.budget.estimatedInputTokens ?? "unset"}`,
     `compacted: ${context.budget.compacted ? "yes" : "no"}`,
   ].join("\n");

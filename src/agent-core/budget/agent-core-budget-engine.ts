@@ -9,6 +9,10 @@ import type {
   AgentCoreTokenEstimator,
 } from "./agent-core-budget-types";
 import { collapseAgentCoreMessages } from "./agent-core-context-collapse";
+import {
+  createAgentCoreBudgetWindowPolicy,
+  mergeAgentCoreBudgetWindowPolicyOverride,
+} from "./agent-core-model-budget-policy";
 import { applyAgentCoreToolResultBudget } from "./agent-core-tool-result-budget";
 
 export type AgentCoreWillCompactContext = {
@@ -19,10 +23,8 @@ export type AgentCoreWillCompactContext = {
 };
 
 export const DEFAULT_AGENT_CORE_BUDGET_POLICY: AgentCoreBudgetPolicy = {
-  maxInputTokens: 64_000,
-  maxOutputTokens: 12_000,
+  ...createAgentCoreBudgetWindowPolicy(),
   preservedTailMessages: 14,
-  compactTriggerRatio: 0.72,
   maxToolResultChars: 12_000,
   preservedToolResultHeadChars: 4_000,
   preservedToolResultTailChars: 4_000,
@@ -69,9 +71,24 @@ export const characterApproxTokenEstimator: AgentCoreTokenEstimator = {
   },
 };
 
-// 判断当前输入是否达到 compact 阈值。阈值用 ratio，而不是硬等 max 才触发。
+function compactThresholdTokens(policy: AgentCoreBudgetPolicy): number {
+  return Math.floor(
+    policy.compactThresholdTokens ?? policy.maxInputTokens * policy.compactTriggerRatio,
+  );
+}
+
+// 判断当前输入是否达到 compact 阈值。阈值单独记录，便于复刻大窗口模型的预留策略。
 function shouldCompact(policy: AgentCoreBudgetPolicy, estimatedInputTokens: number): boolean {
-  return estimatedInputTokens >= policy.maxInputTokens * policy.compactTriggerRatio;
+  return estimatedInputTokens >= compactThresholdTokens(policy);
+}
+
+function createAgentCoreBudgetPolicy(
+  policy: Partial<AgentCoreBudgetPolicy> | undefined,
+): AgentCoreBudgetPolicy {
+  return mergeAgentCoreBudgetWindowPolicyOverride(
+    DEFAULT_AGENT_CORE_BUDGET_POLICY,
+    policy,
+  ) as AgentCoreBudgetPolicy;
 }
 
 function assistantOwnsToolResult(message: AgentCoreMessage, toolResult: AgentCoreMessage): boolean {
@@ -201,6 +218,7 @@ function createCompactBoundary(args: {
 
 // 构建预算状态。queryLoop 和 prompt context 都应该消费同一个 budget state。
 function createBudgetState(args: {
+  policy: AgentCoreBudgetPolicy;
   estimatedInputTokens: number;
   compacted: boolean;
   compactedAt?: string;
@@ -209,6 +227,10 @@ function createBudgetState(args: {
   toolCallInputsCompacted: number;
 }): AgentCoreBudgetState {
   return {
+    contextWindowTokens: args.policy.contextWindowTokens,
+    inputBudgetTokens: args.policy.maxInputTokens,
+    outputBudgetTokens: args.policy.maxOutputTokens,
+    compactThresholdTokens: compactThresholdTokens(args.policy),
     estimatedInputTokens: args.estimatedInputTokens,
     compacted: args.compacted,
     compactedAt: args.compactedAt,
@@ -226,10 +248,7 @@ export async function applyAgentCoreBudget(args: {
   summarizer: AgentCoreSummarizer;
   onWillCompact?: (context: AgentCoreWillCompactContext) => void | Promise<void>;
 }): Promise<AgentCoreCompactionResult> {
-  const policy = {
-    ...DEFAULT_AGENT_CORE_BUDGET_POLICY,
-    ...args.policy,
-  };
+  const policy = createAgentCoreBudgetPolicy(args.policy);
   const estimator = args.estimator ?? characterApproxTokenEstimator;
   const preprocessed = applyAgentCoreToolResultBudget(args.messages, policy);
   const estimatedInputTokens = estimator.estimateMessages(preprocessed.messages);
@@ -241,6 +260,7 @@ export async function applyAgentCoreBudget(args: {
       budgetState: createBudgetState({
         estimatedInputTokens,
         compacted: false,
+        policy,
         toolResultsCompacted: preprocessed.stats.toolResultsCompacted,
         microCompactedToolResults: preprocessed.stats.microCompactedToolResults,
         toolCallInputsCompacted: preprocessed.stats.toolCallInputsCompacted,
@@ -274,6 +294,7 @@ export async function applyAgentCoreBudget(args: {
     estimatedInputTokens: estimator.estimateMessages(compactedMessages),
     compacted: true,
     compactedAt,
+    policy,
     toolResultsCompacted: preprocessed.stats.toolResultsCompacted,
     microCompactedToolResults: preprocessed.stats.microCompactedToolResults,
     toolCallInputsCompacted: preprocessed.stats.toolCallInputsCompacted,

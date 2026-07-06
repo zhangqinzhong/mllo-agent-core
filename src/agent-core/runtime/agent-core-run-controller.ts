@@ -139,6 +139,7 @@ export async function* runAgentCoreController(
     const budgetRun = await applyAgentCoreRunBudgetWithHookRecording({
       messages: context.queryArgs.messages,
       model,
+      provider,
       session,
       budget: options.budget,
       hooks,
@@ -288,6 +289,7 @@ export async function* runAgentCoreController(
         const compactRun = await applyAgentCoreRunBudgetWithHookRecording({
           messages: result.messages,
           model,
+          provider,
           session,
           budget: createAgentCoreReactiveCompactBudget(options.budget),
           hooks,

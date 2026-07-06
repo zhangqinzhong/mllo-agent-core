@@ -159,6 +159,7 @@ modelProvider: {
   apiKey: process.env.MODEL_API_KEY!,
   model: 'agent-model',
   maxTokens: 4096,
+  contextWindowTokens: 200000,
   temperature: 0.1
 }
 ```
@@ -175,6 +176,7 @@ Or load providers from an mllo config file:
       "baseUrl": "http://127.0.0.1:1234/v1",
       "apiKey": "local-key",
       "model": "local-model",
+      "contextWindowTokens": 65536,
       "promptProfile": "local-compact"
     }
   ]
@@ -182,7 +184,8 @@ Or load providers from an mllo config file:
 ```
 
 Use `promptProfile: "local-compact"` for small local context windows. Use the
-default full profile when the provider can handle larger system context.
+default full profile when the provider can handle larger system context. Set
+`contextWindowTokens` when the provider exposes a known context window.
 
 ## Claude and Codex Workers
 

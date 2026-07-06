@@ -139,6 +139,7 @@ modelProvider: {
   apiKey: process.env.MODEL_API_KEY!,
   model: 'agent-model',
   maxTokens: 4096,
+  contextWindowTokens: 200000,
   temperature: 0.1
 }
 ```
@@ -155,13 +156,14 @@ modelProvider: {
       "baseUrl": "http://127.0.0.1:1234/v1",
       "apiKey": "local-key",
       "model": "local-model",
+      "contextWindowTokens": 65536,
       "promptProfile": "local-compact"
     }
   ]
 }
 ```
 
-小上下文本地模型建议用 `promptProfile: "local-compact"`。大上下文模型可以使用默认 full profile。
+小上下文本地模型建议用 `promptProfile: "local-compact"`。大上下文模型可以使用默认 full profile；如果 provider 明确暴露上下文窗口，就填 `contextWindowTokens`。
 
 ## Claude / Codex Worker
 

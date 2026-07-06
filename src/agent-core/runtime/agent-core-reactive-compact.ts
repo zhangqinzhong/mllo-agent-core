@@ -18,8 +18,12 @@ function withAgentCoreRunBudgetState(args: {
   return {
     ...args.promptContext,
     budget: {
-      inputBudgetTokens: args.budgetOptions?.policy?.maxInputTokens,
-      outputBudgetTokens: args.budgetOptions?.policy?.maxOutputTokens,
+      contextWindowTokens: args.budgetState.contextWindowTokens,
+      inputBudgetTokens:
+        args.budgetState.inputBudgetTokens ?? args.budgetOptions?.policy?.maxInputTokens,
+      outputBudgetTokens:
+        args.budgetState.outputBudgetTokens ?? args.budgetOptions?.policy?.maxOutputTokens,
+      compactThresholdTokens: args.budgetState.compactThresholdTokens,
       estimatedInputTokens: args.budgetState.estimatedInputTokens,
       compacted: args.budgetState.compacted,
     },

@@ -9,6 +9,7 @@ export type AgentCoreHttpModelConfig = {
   apiKey: string;
   model: string;
   maxTokens?: number;
+  contextWindowTokens?: number;
   temperature?: number;
   anthropicVersion?: string;
   promptProfile?: AgentCorePromptProfile;

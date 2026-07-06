@@ -21,6 +21,8 @@ const requiredPaths = [
   "dist/src/index.d.ts",
   "dist/src/cli/mllo-cli.js",
   "dist/src/observer/index.js",
+  "dist/src/agent-core/tools/vendor/ripgrep/arm64-darwin/rg",
+  "dist/src/agent-core/tools/vendor/ripgrep/x64-darwin/rg",
 ];
 
 for (const requiredPath of requiredPaths) {

@@ -195,8 +195,10 @@ function renderTurnWorkflowRuns(context: AgentCorePromptContext): string {
 // 渲染当前预算状态。compact 后的估算和标记属于本轮，而不是旧 system prompt。
 function renderTurnBudget(context: AgentCorePromptContext): string {
   return [
+    `contextWindowTokens: ${context.budget.contextWindowTokens ?? "unset"}`,
     `inputBudgetTokens: ${context.budget.inputBudgetTokens ?? "unset"}`,
     `outputBudgetTokens: ${context.budget.outputBudgetTokens ?? "unset"}`,
+    `compactThresholdTokens: ${context.budget.compactThresholdTokens ?? "unset"}`,
     `estimatedInputTokens: ${context.budget.estimatedInputTokens ?? "unset"}`,
     `compacted: ${context.budget.compacted ? "yes" : "no"}`,
   ].join("\n");

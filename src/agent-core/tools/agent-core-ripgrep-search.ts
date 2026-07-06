@@ -1,5 +1,6 @@
-import { execFile } from "node:child_process";
-import { relative, sep } from "node:path";
+import { execFile, spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -26,11 +27,92 @@ export type AgentCoreRipgrepSearchResult = {
   truncated: boolean;
 };
 
-const RIPGREP_MAX_BUFFER = 2 * 1024 * 1024;
+const RIPGREP_MAX_BUFFER = 20_000_000;
+const RIPGREP_TIMEOUT_MS = 20_000;
 const VCS_EXCLUDE_GLOBS = ["!.git", "!.svn", "!.hg", "!.jj", "!.sl"];
+
+type AgentCoreRipgrepConfig = {
+  mode: "builtin" | "system";
+  command: string;
+  args: string[];
+  note?: string;
+};
+
+let ripgrepConfig: AgentCoreRipgrepConfig | undefined;
 
 function normalizePath(path: string): string {
   return path.split(sep).join("/");
+}
+
+function isEnvDefinedFalsy(value: string | undefined): boolean {
+  if (value === undefined) {
+    return false;
+  }
+  return ["0", "false", "no", "off"].includes(value.trim().toLowerCase());
+}
+
+function systemRipgrepAvailable(): boolean {
+  const result = spawnSync("rg", ["--version"], {
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  return result.status === 0;
+}
+
+function vendoredRipgrepPath(): string {
+  const binaryName = process.platform === "win32" ? "rg.exe" : "rg";
+  return resolve(__dirname, "vendor", "ripgrep", `${process.arch}-${process.platform}`, binaryName);
+}
+
+export function resolveAgentCoreRipgrepConfig(
+  args: {
+    builtinPath?: string;
+    systemAvailable?: boolean;
+    platform?: NodeJS.Platform;
+    useBuiltinRipgrep?: string;
+  } = {},
+): AgentCoreRipgrepConfig {
+  const userWantsSystemRipgrep = isEnvDefinedFalsy(
+    args.useBuiltinRipgrep ?? process.env.USE_BUILTIN_RIPGREP,
+  );
+  const systemAvailable = args.systemAvailable ?? systemRipgrepAvailable();
+  if (userWantsSystemRipgrep && systemAvailable) {
+    return {
+      mode: "system",
+      command: "rg",
+      args: [],
+    };
+  }
+
+  const builtinPath = args.builtinPath ?? vendoredRipgrepPath();
+  if (existsSync(builtinPath)) {
+    return {
+      mode: "builtin",
+      command: builtinPath,
+      args: [],
+    };
+  }
+
+  if (systemAvailable) {
+    return {
+      mode: "system",
+      command: "rg",
+      args: [],
+      note: `fallback: builtin rg unavailable on ${args.platform ?? process.platform}, using system rg`,
+    };
+  }
+
+  return {
+    mode: "builtin",
+    command: builtinPath,
+    args: [],
+    note: `no ripgrep available on ${args.platform ?? process.platform}; install ripgrep or ship a vendor binary`,
+  };
+}
+
+function getRipgrepConfig(): AgentCoreRipgrepConfig {
+  ripgrepConfig ??= resolveAgentCoreRipgrepConfig();
+  return ripgrepConfig;
 }
 
 function targetPath(input: AgentCoreRipgrepSearchInput): string {
@@ -178,12 +260,19 @@ function isNoMatchesExit(error: unknown): boolean {
 export async function runAgentCoreRipgrepSearch(
   input: AgentCoreRipgrepSearchInput,
 ): Promise<AgentCoreRipgrepSearchResult | undefined> {
+  const config = getRipgrepConfig();
   try {
-    const { stdout } = await execFileAsync("rg", commandArgs(input), {
-      cwd: input.workspaceRoot,
-      maxBuffer: RIPGREP_MAX_BUFFER,
-      windowsHide: true,
-    });
+    const { stdout } = await execFileAsync(
+      config.command,
+      [...config.args, ...commandArgs(input)],
+      {
+        cwd: input.workspaceRoot,
+        killSignal: process.platform === "win32" ? undefined : "SIGKILL",
+        maxBuffer: RIPGREP_MAX_BUFFER,
+        timeout: RIPGREP_TIMEOUT_MS,
+        windowsHide: true,
+      },
+    );
     const allLines = normalizeRipgrepOutput(stdout);
     const windowed = applyWindow(allLines, input.headLimit, input.offset);
     return {

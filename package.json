@@ -54,7 +54,7 @@
     "claude:trace:enable": "node scripts/configure-claude-code-trace-proxy.mjs enable",
     "claude:trace:restore": "node scripts/configure-claude-code-trace-proxy.mjs restore",
     "claude:trace:status": "node scripts/configure-claude-code-trace-proxy.mjs status",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node config/scripts/copy-runtime-assets.mjs",
     "clean": "node config/scripts/clean-dist.mjs",
     "prepare": "node config/scripts/prepare-package.mjs"
   },
