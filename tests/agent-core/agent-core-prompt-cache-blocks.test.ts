@@ -225,6 +225,37 @@ describe("agent core prompt cache blocks", () => {
     });
   });
 
+  it("supports Bearer authentication for Anthropic-compatible endpoints", async () => {
+    let capturedHeaders: Headers | undefined;
+    const adapter = createAgentCoreAnthropicModelAdapter(
+      {
+        protocol: "anthropic",
+        baseUrl: "https://model.test/anthropic",
+        apiKey: "test-token",
+        model: "deepseek-test",
+        anthropicAuthHeader: "authorization",
+      },
+      async (_url, init) => {
+        capturedHeaders = new Headers(init?.headers);
+        return new Response(
+          JSON.stringify({
+            content: [{ type: "text", text: "ok" }],
+          }),
+          { status: 200 },
+        );
+      },
+    );
+
+    await adapter.complete?.({
+      systemPrompt: "system",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [],
+    });
+
+    expect(capturedHeaders?.get("authorization")).toBe("Bearer test-token");
+    expect(capturedHeaders?.get("x-api-key")).toBeNull();
+  });
+
   it("keeps OpenAI system content in stable block order without provider-specific cache fields", async () => {
     const capturedBodies: unknown[] = [];
     const adapter = createAgentCoreOpenAIModelAdapter(

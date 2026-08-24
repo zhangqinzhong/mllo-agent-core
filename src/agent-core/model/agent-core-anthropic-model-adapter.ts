@@ -238,6 +238,20 @@ function createAnthropicRequestBody(
   });
 }
 
+// 第三方 Anthropic-compatible 端点可能沿用 Claude Code 的 Bearer token 约定。
+function createAnthropicRequestHeaders(config: AgentCoreHttpModelConfig): Record<string, string> {
+  const headers: Record<string, string> = {
+    "anthropic-version": config.anthropicVersion ?? "2023-06-01",
+    "Content-Type": "application/json",
+  };
+  if (config.anthropicAuthHeader === "authorization") {
+    headers["Authorization"] = `Bearer ${config.apiKey}`;
+  } else {
+    headers["x-api-key"] = config.apiKey;
+  }
+  return headers;
+}
+
 // 创建 Anthropic Messages API adapter。Anthropic-compatible 端点都走这里。
 export function createAgentCoreAnthropicModelAdapter(
   config: AgentCoreHttpModelConfig,
@@ -250,11 +264,7 @@ export function createAgentCoreAnthropicModelAdapter(
         url: anthropicMessagesUrl(config.baseUrl),
         init: {
           method: "POST",
-          headers: {
-            "x-api-key": config.apiKey,
-            "anthropic-version": config.anthropicVersion ?? "2023-06-01",
-            "Content-Type": "application/json",
-          },
+          headers: createAnthropicRequestHeaders(config),
           body: createAnthropicRequestBody(request, config, false),
           signal: request.signal,
         },
@@ -298,11 +308,7 @@ export function createAgentCoreAnthropicModelAdapter(
         url: anthropicMessagesUrl(config.baseUrl),
         init: {
           method: "POST",
-          headers: {
-            "x-api-key": config.apiKey,
-            "anthropic-version": config.anthropicVersion ?? "2023-06-01",
-            "Content-Type": "application/json",
-          },
+          headers: createAnthropicRequestHeaders(config),
           body: createAnthropicRequestBody(request, config, true),
           signal: request.signal,
         },

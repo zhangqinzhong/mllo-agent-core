@@ -168,6 +168,9 @@ modelProvider: {
 }
 ```
 
+Anthropic-compatible gateways that expect a bearer token can set
+`anthropicAuthHeader: 'authorization'`; the default is the standard `x-api-key` header.
+
 Or load providers from an mllo config file:
 
 ```json

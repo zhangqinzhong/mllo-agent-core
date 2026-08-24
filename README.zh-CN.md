@@ -146,6 +146,9 @@ modelProvider: {
 }
 ```
 
+如果 Anthropic-compatible 网关要求 Bearer token，可设置
+`anthropicAuthHeader: 'authorization'`；默认仍使用标准 `x-api-key`。
+
 也可以从 mllo config 文件加载：
 
 ```json
