@@ -35,6 +35,7 @@ import type {
   AgentCoreContextBuilderOptions,
 } from "./agent-core-context-builder-types";
 import type { AgentCorePromptBlock } from "../query-loop/agent-core-prompt-block-types";
+import { createAgentCoreToolSet } from "../tools/agent-core-tool-set";
 
 // 规范化 cwd。所有相对路径权限判断都要基于同一个 cwd。
 function normalizeCwd(cwd: string): string {
@@ -163,47 +164,54 @@ export async function buildAgentCoreContext(
     session: options.session,
     checkpointDir: runtimePaths.checkpointDir,
   });
-  const candidateTools = createAgentCoreBaseTools({
-    permissionContext,
-    filesystem:
-      checkpointStore === undefined
-        ? undefined
-        : {
-            onBeforeFileWrite(snapshot) {
-              return checkpointStore.snapshotFile(snapshot);
-            },
-            onAfterFileWrite(snapshot) {
-              return checkpointStore.recordFileWrite(snapshot);
+  const baseTools =
+    options.includeBaseTools === false
+      ? []
+      : createAgentCoreBaseTools({
+          permissionContext,
+          filesystem:
+            checkpointStore === undefined
+              ? undefined
+              : {
+                  onBeforeFileWrite(snapshot) {
+                    return checkpointStore.snapshotFile(snapshot);
+                  },
+                  onAfterFileWrite(snapshot) {
+                    return checkpointStore.recordFileWrite(snapshot);
+                  },
+                },
+          plan: {
+            journalPath: runtimePaths.planJournalPath,
+          },
+          skills: {
+            cwd,
+            runtimeHome: options.runtimeHome,
+            homeDir: options.skillHomeDir,
+          },
+          shell: {
+            cwdTracker,
+            outputDir: runtimePaths.shellOutputDir,
+            taskRegistry: new AgentCoreShellTaskRegistry({
+              journalPath: runtimePaths.shellTaskJournalPath,
+              readableOutputDirs: [runtimePaths.shellOutputDir],
+            }),
+            executionBackend: shellExecutionBackend,
+            requireSandboxedBackend: options.requireSandboxedShell,
+            sessionEnvironment: {
+              projectDir: cwd,
+              runtimeDir: runtimePaths.runtimeDir,
+              sessionId: options.session?.handle.sessionId,
             },
           },
-    plan: {
-      journalPath: runtimePaths.planJournalPath,
-    },
-    skills: {
-      cwd,
-      runtimeHome: options.runtimeHome,
-      homeDir: options.skillHomeDir,
-    },
-    shell: {
-      cwdTracker,
-      outputDir: runtimePaths.shellOutputDir,
-      taskRegistry: new AgentCoreShellTaskRegistry({
-        journalPath: runtimePaths.shellTaskJournalPath,
-        readableOutputDirs: [runtimePaths.shellOutputDir],
-      }),
-      executionBackend: shellExecutionBackend,
-      requireSandboxedBackend: options.requireSandboxedShell,
-      sessionEnvironment: {
-        projectDir: cwd,
-        runtimeDir: runtimePaths.runtimeDir,
-        sessionId: options.session?.handle.sessionId,
-      },
-    },
-    mcpClients: options.mcpClients,
-    delegatedAgents: {
-      workers: options.workers ?? [],
-      workflowJournalPath: runtimePaths.workflowJournalPath,
-    },
+          mcpClients: options.mcpClients,
+          delegatedAgents: {
+            workers: options.workers ?? [],
+            workflowJournalPath: runtimePaths.workflowJournalPath,
+          },
+        });
+  const candidateTools = createAgentCoreToolSet({
+    baseTools,
+    additionalTools: options.additionalTools,
   });
   const toolAvailability = await resolveAgentCoreToolAvailability({
     tools: candidateTools,

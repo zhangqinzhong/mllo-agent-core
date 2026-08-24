@@ -113,3 +113,19 @@ MLLO_DUMP_PROMPTS=1
 ```
 
 这个文件适合排查模型协议、工具 schema、上下文膨胀和流式响应问题。
+
+## 8. 宿主领域工具
+
+桌面端、内容系统或服务端可以把自己的领域能力注入同一个 Query Loop：
+
+```ts
+runAgentCoreController({
+  // 保留文件、Shell、Skills 等默认工具。
+  includeBaseTools: true,
+  additionalTools: [contentSearchTool, contentOrganizeTool],
+  toolExposureMode: 'direct',
+  // 省略其他运行参数。
+})
+```
+
+纯领域 Agent 可以设置 `includeBaseTools: false`，只暴露宿主传入的工具。Core 会拒绝同名工具，避免宿主静默覆盖默认工具的权限或实现。

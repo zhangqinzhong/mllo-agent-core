@@ -59,6 +59,8 @@ export type AgentCoreContextBuilderOptions = {
   shellExecutionBackend?: AgentCoreShellExecutionBackend;
   requireSandboxedShell?: boolean;
   toolExposureMode?: AgentCoreToolExposureMode;
+  includeBaseTools?: boolean;
+  additionalTools?: readonly AgentCoreToolDefinition[];
 };
 
 export type AgentCoreBuiltContext = {

@@ -128,6 +128,8 @@ for await (const event of runAgentCoreController({
 
 `runAgentCoreController()` 是 async generator。宿主应用可以把事件渲染成 CLI 输出、GUI timeline、日志、WebSocket 消息或测试断言。
 
+宿主可以用 `additionalTools` 注入领域工具；设置 `includeBaseTools: false` 后只运行宿主工具，适合资料整理、业务自动化等不需要通用代码工具的产品。
+
 ## 配置
 
 可以直接传入 provider：

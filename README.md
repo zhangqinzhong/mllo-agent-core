@@ -148,6 +148,10 @@ for await (const event of runAgentCoreController({
 The controller is an async generator. A host can render events as CLI output,
 GUI timeline items, logs, WebSocket messages, or test assertions.
 
+Hosts can inject domain capabilities through `additionalTools`. Set
+`includeBaseTools: false` to expose only host-owned tools for products that do
+not need the general coding toolset.
+
 ## Configuration
 
 You can pass a provider directly:

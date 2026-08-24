@@ -26,6 +26,8 @@ import type { AgentCoreShellExecutionBackend } from "../tools/shell-execution-ba
 import type { AgentCorePromptProfile } from "../context/agent-core-prompt-profile";
 import type { AgentCoreMiddleware } from "../middleware/agent-core-middleware-types";
 import type { AgentCoreLangfuseTracingOptions } from "../observability/agent-core-langfuse-options";
+import type { AgentCoreToolDefinition } from "../tools/agent-core-tool-types";
+import type { AgentCoreToolExposureMode } from "../tools/agent-core-tool-exposure";
 
 export type AgentCoreRunControllerOptions = {
   cwd: string;
@@ -49,6 +51,9 @@ export type AgentCoreRunControllerOptions = {
   middlewares?: readonly AgentCoreMiddleware[];
   workers?: readonly AgentCoreWorker[];
   mcpClients?: readonly AgentCoreMcpClient[];
+  includeBaseTools?: boolean;
+  additionalTools?: readonly AgentCoreToolDefinition[];
+  toolExposureMode?: AgentCoreToolExposureMode;
   observability?: {
     langfuse?: AgentCoreLangfuseTracingOptions;
   };
