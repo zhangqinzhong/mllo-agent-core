@@ -130,6 +130,8 @@ for await (const event of runAgentCoreController({
 
 宿主可以用 `additionalTools` 注入领域工具；设置 `includeBaseTools: false` 后只运行宿主工具，适合资料整理、业务自动化等不需要通用代码工具的产品。
 
+产品级行为通过结构化 `additionalSystemPromptBlocks` 注入；这些块会进入 session snapshot，并保留调用方声明的 Prompt Cache scope。
+
 ## 配置
 
 可以直接传入 provider：

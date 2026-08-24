@@ -152,6 +152,9 @@ Hosts can inject domain capabilities through `additionalTools`. Set
 `includeBaseTools: false` to expose only host-owned tools for products that do
 not need the general coding toolset.
 
+Product-specific behavior belongs in structured `additionalSystemPromptBlocks`.
+Blocks are included in the session snapshot and keep their declared prompt-cache scope.
+
 ## Configuration
 
 You can pass a provider directly:

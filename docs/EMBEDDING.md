@@ -123,9 +123,12 @@ runAgentCoreController({
   // 保留文件、Shell、Skills 等默认工具。
   includeBaseTools: true,
   additionalTools: [contentSearchTool, contentOrganizeTool],
+  additionalSystemPromptBlocks: [contentProductPolicy],
   toolExposureMode: 'direct',
   // 省略其他运行参数。
 })
 ```
 
 纯领域 Agent 可以设置 `includeBaseTools: false`，只暴露宿主传入的工具。Core 会拒绝同名工具，避免宿主静默覆盖默认工具的权限或实现。
+
+宿主产品策略使用 `additionalSystemPromptBlocks` 注入。每个 block 都要使用唯一名称并声明 cache scope；Core 会把它和基础策略一起写入 session snapshot，恢复会话时不从当前宿主环境重新猜测。

@@ -21,7 +21,6 @@ import { createAgentCoreWorkerPermissionRequester } from "./agent-core-worker-pe
 import {
   createAgentCoreReactiveCompactFailureMessage,
   createAgentCoreReactiveCompactBudget,
-  renderAgentCoreRunSystemPrompt,
   renderAgentCoreRunSystemPromptBlocks,
   renderAgentCoreRunTurnContext,
   shouldRunAgentCoreReactiveCompact,
@@ -56,6 +55,8 @@ import {
   persistedAgentCoreRunResumeMessageCount,
 } from "./agent-core-run-context-metadata";
 import { buildAgentCoreRunContext } from "./agent-core-run-build-context";
+import { appendAgentCoreHostPromptBlocks } from "../context/agent-core-host-prompt-blocks";
+import { joinAgentCorePromptBlocks } from "../query-loop/agent-core-prompt-block-types";
 import {
   createAgentCoreLangfuseRunTrace,
   finishAgentCoreLangfuseRunTrace,
@@ -204,18 +205,16 @@ export async function* runAgentCoreController(
       });
     };
     if (budgeted.compacted) {
-      systemPrompt = renderAgentCoreRunSystemPrompt({
-        promptContext: context.promptContext,
-        promptProfile: context.promptProfile,
-        budgetState,
-        budgetOptions: options.budget,
-      });
-      systemPromptBlocks = renderAgentCoreRunSystemPromptBlocks({
-        promptContext: context.promptContext,
-        promptProfile: context.promptProfile,
-        budgetState,
-        budgetOptions: options.budget,
-      });
+      systemPromptBlocks = appendAgentCoreHostPromptBlocks(
+        renderAgentCoreRunSystemPromptBlocks({
+          promptContext: context.promptContext,
+          promptProfile: context.promptProfile,
+          budgetState,
+          budgetOptions: options.budget,
+        }),
+        options.additionalSystemPromptBlocks,
+      );
+      systemPrompt = joinAgentCorePromptBlocks(systemPromptBlocks);
       turnContext = renderAgentCoreRunTurnContext({
         promptContext: context.promptContext,
         promptProfile: context.promptProfile,
@@ -306,18 +305,16 @@ export async function* runAgentCoreController(
         if (budgetState.compacted) {
           persistedMessageCount = 0;
         }
-        systemPrompt = renderAgentCoreRunSystemPrompt({
-          promptContext: context.promptContext,
-          promptProfile: context.promptProfile,
-          budgetState,
-          budgetOptions: options.budget,
-        });
-        systemPromptBlocks = renderAgentCoreRunSystemPromptBlocks({
-          promptContext: context.promptContext,
-          promptProfile: context.promptProfile,
-          budgetState,
-          budgetOptions: options.budget,
-        });
+        systemPromptBlocks = appendAgentCoreHostPromptBlocks(
+          renderAgentCoreRunSystemPromptBlocks({
+            promptContext: context.promptContext,
+            promptProfile: context.promptProfile,
+            budgetState,
+            budgetOptions: options.budget,
+          }),
+          options.additionalSystemPromptBlocks,
+        );
+        systemPrompt = joinAgentCorePromptBlocks(systemPromptBlocks);
         turnContext = renderAgentCoreRunTurnContext({
           promptContext: context.promptContext,
           promptProfile: context.promptProfile,

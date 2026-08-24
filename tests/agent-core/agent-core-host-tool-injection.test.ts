@@ -68,4 +68,53 @@ describe("Agent Core host tool injection", () => {
       }),
     ).rejects.toThrow("Duplicate Agent Core tool name: content_search");
   });
+
+  it("appends host product policy as a structured prompt block", async () => {
+    const cwd = await createTemporaryDirectory();
+    const context = await buildAgentCoreContext({
+      cwd,
+      model: {
+        complete: async () => ({ content: "done" }),
+      },
+      includeBaseTools: false,
+      additionalSystemPromptBlocks: [
+        {
+          name: "host_product_policy",
+          text: "# Host Product\nTreat captured sources as the factual record.",
+          cacheScope: "session",
+        },
+      ],
+      runtimeHome: {
+        homePath: join(cwd, ".mllo"),
+      },
+    });
+
+    expect(context.systemPromptBlocks.at(-1)).toMatchObject({
+      name: "host_product_policy",
+      cacheScope: "session",
+    });
+    expect(context.systemPrompt).toContain("Treat captured sources as the factual record.");
+  });
+
+  it("rejects host prompt block names that shadow Core blocks", async () => {
+    const cwd = await createTemporaryDirectory();
+    await expect(
+      buildAgentCoreContext({
+        cwd,
+        model: {
+          complete: async () => ({ content: "done" }),
+        },
+        additionalSystemPromptBlocks: [
+          {
+            name: "tools",
+            text: "shadow",
+            cacheScope: "session",
+          },
+        ],
+        runtimeHome: {
+          homePath: join(cwd, ".mllo"),
+        },
+      }),
+    ).rejects.toThrow("Duplicate Agent Core prompt block name: tools");
+  });
 });

@@ -44,6 +44,7 @@ export async function buildAgentCoreRunContext(args: {
     middlewares: args.options.middlewares,
     includeBaseTools: args.options.includeBaseTools,
     additionalTools: args.options.additionalTools,
+    additionalSystemPromptBlocks: args.options.additionalSystemPromptBlocks,
     toolExposureMode: args.options.toolExposureMode,
     modelProfile: {
       provider: args.provider.name ?? args.provider.protocol,

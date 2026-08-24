@@ -28,6 +28,7 @@ import type { AgentCoreMiddleware } from "../middleware/agent-core-middleware-ty
 import type { AgentCoreLangfuseTracingOptions } from "../observability/agent-core-langfuse-options";
 import type { AgentCoreToolDefinition } from "../tools/agent-core-tool-types";
 import type { AgentCoreToolExposureMode } from "../tools/agent-core-tool-exposure";
+import type { AgentCorePromptBlock } from "../query-loop/agent-core-prompt-block-types";
 
 export type AgentCoreRunControllerOptions = {
   cwd: string;
@@ -53,6 +54,7 @@ export type AgentCoreRunControllerOptions = {
   mcpClients?: readonly AgentCoreMcpClient[];
   includeBaseTools?: boolean;
   additionalTools?: readonly AgentCoreToolDefinition[];
+  additionalSystemPromptBlocks?: readonly AgentCorePromptBlock[];
   toolExposureMode?: AgentCoreToolExposureMode;
   observability?: {
     langfuse?: AgentCoreLangfuseTracingOptions;

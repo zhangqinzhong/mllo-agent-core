@@ -61,6 +61,7 @@ export type AgentCoreContextBuilderOptions = {
   toolExposureMode?: AgentCoreToolExposureMode;
   includeBaseTools?: boolean;
   additionalTools?: readonly AgentCoreToolDefinition[];
+  additionalSystemPromptBlocks?: readonly AgentCorePromptBlock[];
 };
 
 export type AgentCoreBuiltContext = {

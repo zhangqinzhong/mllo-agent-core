@@ -14,10 +14,7 @@ import {
 } from "../tools/agent-core-tool-availability";
 import { AgentCoreCheckpointStore } from "../checkpoint/agent-core-checkpoint-store";
 import { getAgentCoreRunSandboxPolicy } from "../runtime/agent-core-run-sandbox-policy";
-import {
-  renderAgentCoreSystemPrompt,
-  renderAgentCoreSystemPromptBlocks,
-} from "./agent-core-prompt-renderer";
+import { renderAgentCoreSystemPromptBlocks } from "./agent-core-prompt-renderer";
 import { AgentCoreShellCwdTracker } from "../tools/shell-cwd-tracker";
 import { readAgentCoreShellCwdState, writeAgentCoreShellCwdState } from "../tools/shell-cwd-state";
 import { AgentCoreShellTaskRegistry } from "../tools/shell-task-registry";
@@ -36,6 +33,8 @@ import type {
 } from "./agent-core-context-builder-types";
 import type { AgentCorePromptBlock } from "../query-loop/agent-core-prompt-block-types";
 import { createAgentCoreToolSet } from "../tools/agent-core-tool-set";
+import { joinAgentCorePromptBlocks } from "../query-loop/agent-core-prompt-block-types";
+import { appendAgentCoreHostPromptBlocks } from "./agent-core-host-prompt-blocks";
 
 // 规范化 cwd。所有相对路径权限判断都要基于同一个 cwd。
 function normalizeCwd(cwd: string): string {
@@ -243,12 +242,13 @@ export async function buildAgentCoreContext(
     budget: options.budget,
     modelProfile: options.modelProfile,
   });
-  const generatedSystemPromptBlocks = renderAgentCoreSystemPromptBlocks(promptContext, {
-    profile: promptProfile,
-  });
-  const generatedSystemPrompt = renderAgentCoreSystemPrompt(promptContext, {
-    profile: promptProfile,
-  });
+  const generatedSystemPromptBlocks = appendAgentCoreHostPromptBlocks(
+    renderAgentCoreSystemPromptBlocks(promptContext, {
+      profile: promptProfile,
+    }),
+    options.additionalSystemPromptBlocks,
+  );
+  const generatedSystemPrompt = joinAgentCorePromptBlocks(generatedSystemPromptBlocks);
   const systemPromptSnapshot = await resolveAgentCoreSystemContextSnapshotResult({
     session: options.session,
     generatedPrompt: generatedSystemPrompt,
