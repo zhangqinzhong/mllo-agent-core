@@ -1,7 +1,9 @@
 import type { AgentCoreMessage } from "../query-loop/agent-core-query-types";
+import { repairAgentCoreToolResultPairing } from "../query-loop/agent-core-tool-result-pairing";
 import type {
   AgentCoreToolCall,
   AgentCoreToolDefinition,
+  AgentCoreToolInputRepairStatus,
   AgentCoreToolInputParseStatus,
 } from "../tools/agent-core-tool-types";
 import { toJSONSchema } from "zod";
@@ -19,6 +21,15 @@ const EMPTY_TOOL_SCHEMA: AgentCoreJsonObject = {
   properties: {},
 };
 const RAW_ARGUMENTS_PREVIEW_CHARS = 1000;
+const PATH_BASED_TOOL_NAMES = new Set([
+  "read_file",
+  "list_dir",
+  "write_file",
+  "edit_file",
+  "multi_edit",
+  "glob_files",
+  "grep_files",
+]);
 
 function asAgentCoreJsonObject(value: unknown): AgentCoreJsonObject | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -30,6 +41,40 @@ function removeJsonSchemaDialect(schema: AgentCoreJsonObject): AgentCoreJsonObje
   const copy = { ...schema };
   delete copy.$schema;
   return copy;
+}
+
+function repairAgentCoreToolInputAliases(args: { toolName: string; input: unknown }): {
+  input: unknown;
+  repairStatus?: AgentCoreToolInputRepairStatus;
+} {
+  const inputObject = asAgentCoreJsonObject(args.input);
+  if (
+    inputObject === undefined ||
+    !PATH_BASED_TOOL_NAMES.has(args.toolName) ||
+    !("file_path" in inputObject) ||
+    "path" in inputObject
+  ) {
+    return {
+      input: args.input,
+    };
+  }
+
+  const { file_path: filePath, ...rest } = inputObject;
+  return {
+    input: {
+      ...rest,
+      path: filePath,
+    },
+    repairStatus: {
+      status: "parameter-alias-renamed",
+      repairs: [
+        {
+          from: "file_path",
+          to: "path",
+        },
+      ],
+    },
+  };
 }
 
 function toAgentCoreToolParameters(tool: AgentCoreToolDefinition): AgentCoreJsonObject {
@@ -180,34 +225,10 @@ export function stringifyAgentCoreToolCallInput(call: AgentCoreToolCall): string
 export function normalizeAgentCoreMessagesForWire(
   messages: readonly AgentCoreMessage[],
 ): AgentCoreMessage[] {
-  const normalized: AgentCoreMessage[] = [];
-  for (let index = 0; index < messages.length; index += 1) {
-    const message = messages[index];
-    normalized.push(message);
-    if (message.role !== "assistant" || (message.toolCalls?.length ?? 0) === 0) {
-      continue;
-    }
-
-    const following = messages.slice(index + 1);
-    const answered = new Set(
-      following
-        .filter((candidate) => candidate.role === "tool")
-        .map((candidate) => candidate.toolCallId),
-    );
-    for (const call of message.toolCalls ?? []) {
-      if (!answered.has(call.id)) {
-        normalized.push({
-          role: "tool",
-          toolCallId: call.id,
-          name: call.name,
-          content: "[no result: the previous turn was interrupted before this tool call completed]",
-          isError: true,
-          errorKind: "interrupted-tool-call",
-        });
-      }
-    }
-  }
-  return normalized;
+  return repairAgentCoreToolResultPairing({
+    messages,
+    reason: "[no result: the previous turn was interrupted before this tool call completed]",
+  }).messages;
 }
 
 // 生成缺失 tool call id。部分 OpenAI 兼容端点可能只按 index 流/返工具调用。
@@ -225,6 +246,36 @@ export function createAgentCoreToolCallIdState(): AgentCoreToolCallIdState {
   };
 }
 
+function recordToolCallIdOccurrence(
+  state: AgentCoreToolCallIdState,
+  id: string,
+  count: number,
+): void {
+  state.counts.set(id, Math.max(state.counts.get(id) ?? 0, count));
+}
+
+export function createAgentCoreToolCallIdStateFromMessages(
+  messages: readonly AgentCoreMessage[],
+): AgentCoreToolCallIdState {
+  const state = createAgentCoreToolCallIdState();
+  for (const message of messages) {
+    if (message.role !== "assistant") {
+      continue;
+    }
+    for (const call of message.toolCalls ?? []) {
+      recordToolCallIdOccurrence(state, call.id, 1);
+      if (call.idRepairStatus !== undefined) {
+        recordToolCallIdOccurrence(
+          state,
+          call.idRepairStatus.originalId,
+          call.idRepairStatus.occurrence,
+        );
+      }
+    }
+  }
+  return state;
+}
+
 // 同一轮重复 tool id 会让 tool_result 归属错乱；保留首个 id，后续加稳定后缀。
 export function ensureAgentCoreToolCallUniqueId(
   call: AgentCoreToolCall,
@@ -235,9 +286,15 @@ export function ensureAgentCoreToolCallUniqueId(
   if (count === 0) {
     return call;
   }
+  const occurrence = count + 1;
   return {
     ...call,
-    id: `${call.id}_${count + 1}`,
+    id: `${call.id}_${occurrence}`,
+    idRepairStatus: {
+      status: "duplicate-id-renamed",
+      originalId: call.idRepairStatus?.originalId ?? call.id,
+      occurrence,
+    },
   };
 }
 
@@ -256,10 +313,15 @@ export function createAgentCoreToolCall(args: {
   arguments: unknown;
 }): AgentCoreToolCall {
   const parsed = parseAgentCoreToolArgumentsWithStatus(args.arguments);
+  const repaired = repairAgentCoreToolInputAliases({
+    toolName: args.name,
+    input: parsed.input,
+  });
   return {
     id: args.id && args.id.length > 0 ? args.id : createFallbackToolCallId(args.index),
     name: args.name,
-    input: parsed.input,
+    input: repaired.input,
     ...(parsed.parseStatus === undefined ? {} : { inputParseStatus: parsed.parseStatus }),
+    ...(repaired.repairStatus === undefined ? {} : { inputRepairStatus: repaired.repairStatus }),
   };
 }

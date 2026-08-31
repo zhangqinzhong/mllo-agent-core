@@ -97,6 +97,8 @@ export function createAgentCoreDelegatedAgentTool(
         return createAgentCoreToolInputValidationResult({
           toolName: "delegate_agent",
           error: parsed.error,
+          input,
+          schema: delegateAgentInputSchema,
         });
       }
       const worker = findWorker(options.workers, parsed.data.agentId);

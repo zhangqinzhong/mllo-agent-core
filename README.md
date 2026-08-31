@@ -100,18 +100,23 @@ When installed or linked as a package, the binary name is `mllo`:
 ```sh
 mllo config path
 mllo run "inspect package.json" --output-format stream-json
+mllo run --continue "continue the previous task"
 mllo observe --port 43110
 ```
 
 `text` output is for humans, `json` emits one final run envelope, and
 `stream-json` emits one JSON event per line plus the final envelope. This gives
 host apps and benchmarks a stable observability path without depending on a UI.
+`--continue` resumes the latest non-archived session for the selected `--cwd`
+using `state.sqlite` first and `session_index.jsonl` as a fallback.
+`mllo chat` preloads input history for the selected `--cwd`, with the current
+or resumed session's prompts first.
 
-`mllo observe` starts a read-only local web observer bound to `127.0.0.1` by
+`mllo observe` starts a read-only local observer API bound to `127.0.0.1` by
 default. It reads `state.sqlite`, `session_index.jsonl`, transcript JSONL files,
-and `dump-prompts` files, then shows sessions, timeline entries, prompt dumps,
-tool events, and raw redacted JSON. It does not execute tools or participate in
-agent decisions.
+and `dump-prompts` files, then exposes sessions, timeline entries, prompt dumps,
+tool events, and raw redacted JSON through JSON endpoints. It does not execute
+tools or participate in agent decisions.
 
 ## Quick Start
 
@@ -143,6 +148,13 @@ for await (const event of runAgentCoreController({
 The controller is an async generator. A host can render events as CLI output,
 GUI timeline items, logs, WebSocket messages, or test assertions.
 
+Hosts can inject domain capabilities through `additionalTools`. Set
+`includeBaseTools: false` to expose only host-owned tools for products that do
+not need the general coding toolset.
+
+Product-specific behavior belongs in structured `additionalSystemPromptBlocks`.
+Blocks are included in the session snapshot and keep their declared prompt-cache scope.
+
 ## Configuration
 
 You can pass a provider directly:
@@ -154,9 +166,13 @@ modelProvider: {
   apiKey: process.env.MODEL_API_KEY!,
   model: 'agent-model',
   maxTokens: 4096,
+  contextWindowTokens: 200000,
   temperature: 0.1
 }
 ```
+
+Anthropic-compatible gateways that expect a bearer token can set
+`anthropicAuthHeader: 'authorization'`; the default is the standard `x-api-key` header.
 
 Or load providers from an mllo config file:
 
@@ -170,6 +186,7 @@ Or load providers from an mllo config file:
       "baseUrl": "http://127.0.0.1:1234/v1",
       "apiKey": "local-key",
       "model": "local-model",
+      "contextWindowTokens": 65536,
       "promptProfile": "local-compact"
     }
   ]
@@ -177,7 +194,8 @@ Or load providers from an mllo config file:
 ```
 
 Use `promptProfile: "local-compact"` for small local context windows. Use the
-default full profile when the provider can handle larger system context.
+default full profile when the provider can handle larger system context. Set
+`contextWindowTokens` when the provider exposes a known context window.
 
 ## Claude and Codex Workers
 
@@ -244,6 +262,7 @@ archived_sessions/
 memories/
 skills/
 dump-prompts/
+external-traces/
 ```
 
 ## Observability
@@ -265,6 +284,23 @@ Dumped requests and responses are written to:
 
 Use this when diagnosing provider protocol issues, tool schema bloat, context
 growth, streaming errors, or unexpected model behavior.
+
+`mllo observe` can also start a local Anthropic-compatible trace proxy for
+debugging another agent or host process. Supported endpoints include Anthropic
+`/v1/messages`, OpenAI-compatible `/v1/chat/completions`, and OpenAI Responses
+`/v1/responses`:
+
+```sh
+mllo observe --anthropic-trace-proxy --trace-proxy-port 43111
+export ANTHROPIC_BASE_URL=http://127.0.0.1:43111
+
+mllo observe --openai-trace-proxy --openai-trace-proxy-port 43112
+export OPENAI_BASE_URL=http://127.0.0.1:43112/v1
+```
+
+The proxy forwards requests to the real upstream and writes redacted summaries
+to `~/.mllo/external-traces/<source>.jsonl`. Add `--trace-capture-bodies` only
+when you intentionally want redacted request/response bodies stored for local debugging.
 
 ## Architecture
 

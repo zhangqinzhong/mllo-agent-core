@@ -2,171 +2,195 @@ import type {
   AgentCoreModelAdapter,
   AgentCoreModelRequest,
   AgentCoreModelResponse,
-  AgentCoreModelStreamEvent
-} from '../query-loop/agent-core-query-types'
-import type { AgentCoreHttpModelConfig } from './agent-core-http-model-config'
+  AgentCoreModelStreamEvent,
+} from "../query-loop/agent-core-query-types";
+import type { AgentCoreHttpModelConfig } from "./agent-core-http-model-config";
 import {
   fetchAgentCoreModelResponse,
-  type AgentCoreModelFetch
-} from './agent-core-model-fetch-response'
+  type AgentCoreModelFetch,
+} from "./agent-core-model-fetch-response";
 import {
   createAgentCoreToolCall,
   normalizeAgentCoreMessagesForWire,
   stringifyAgentCoreToolCallInput,
-  toAgentCoreWireToolSchema
-} from './agent-core-model-wire'
+  toAgentCoreWireToolSchema,
+} from "./agent-core-model-wire";
+import { joinAgentCorePromptBlocks } from "../query-loop/agent-core-prompt-block-types";
 import {
   createAgentCoreModelHttpError,
-  createAgentCoreModelProviderError
-} from './agent-core-model-error-classification'
-import { readAgentCoreSseData } from './agent-core-sse-events'
-import { parseAgentCoreStreamJsonEvent } from './agent-core-stream-json-event'
+  createAgentCoreModelProviderError,
+} from "./agent-core-model-error-classification";
+import { normalizeOpenAIModelUsage, type AgentCoreModelUsage } from "./agent-core-model-usage";
+import { readAgentCoreSseData } from "./agent-core-sse-events";
+import { parseAgentCoreStreamJsonEvent } from "./agent-core-stream-json-event";
 import {
   flushOpenAIToolCalls,
   mergeOpenAIToolCallDeltas,
-  type OpenAIStreamingToolCall
-} from './agent-core-openai-streaming-tool-calls'
+  type OpenAIStreamingToolCall,
+} from "./agent-core-openai-streaming-tool-calls";
 
 type OpenAIChatMessage = {
-  role: 'system' | 'user' | 'assistant' | 'tool'
-  content: string | null
-  tool_call_id?: string
-  name?: string
+  role: "system" | "user" | "assistant" | "tool";
+  content: string | null;
+  tool_call_id?: string;
+  name?: string;
   tool_calls?: {
-    id: string
-    type: 'function'
+    id: string;
+    type: "function";
     function: {
-      name: string
-      arguments: string
-    }
-  }[]
-}
+      name: string;
+      arguments: string;
+    };
+  }[];
+};
 
 type OpenAIChatCompletionResponse = {
   choices?: {
     message?: {
-      content?: string | null
+      content?: string | null;
       tool_calls?: {
-        id?: string
+        id?: string;
         function?: {
-          name?: string
-          arguments?: string
-        }
-      }[]
-    }
-  }[]
+          name?: string;
+          arguments?: string;
+        };
+      }[];
+    };
+  }[];
   error?: {
-    message?: string
-  }
-}
+    message?: string;
+  };
+  usage?: OpenAIUsage;
+};
 
 type OpenAIChatCompletionChunk = {
   choices?: {
     delta?: {
-      content?: string | null
+      content?: string | null;
       tool_calls?: {
-        index?: number
-        id?: string
+        index?: number;
+        id?: string;
         function?: {
-          name?: string
-          arguments?: string
-        }
-      }[]
-    }
-  }[]
+          name?: string;
+          arguments?: string;
+        };
+      }[];
+    };
+  }[];
   error?: {
-    message?: string
-  }
-}
+    message?: string;
+  };
+  usage?: OpenAIUsage;
+};
+
+type OpenAIUsage = {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  prompt_tokens_details?: {
+    cached_tokens?: number;
+  };
+};
 
 // 读取 OpenAI 错误响应。stream 失败时服务端通常还是返回 JSON 错误体。
 async function readOpenAIErrorMessage(response: Response, fallback: string): Promise<string> {
   try {
-    const body = (await response.json()) as OpenAIChatCompletionResponse
-    return body.error?.message ?? fallback
+    const body = (await response.json()) as OpenAIChatCompletionResponse;
+    return body.error?.message ?? fallback;
   } catch {
-    return fallback
+    return fallback;
   }
 }
 
 // OpenAI 协议把 system 作为普通 message；tool call/result 通过 tool_calls/tool_call_id 关联。
 function toOpenAIMessages(request: AgentCoreModelRequest): OpenAIChatMessage[] {
-  const messages: OpenAIChatMessage[] = []
-  if (request.systemPrompt !== undefined && request.systemPrompt.length > 0) {
+  const messages: OpenAIChatMessage[] = [];
+  const systemPrompt =
+    request.systemPromptBlocks === undefined
+      ? request.systemPrompt
+      : joinAgentCorePromptBlocks(request.systemPromptBlocks);
+  if (systemPrompt !== undefined && systemPrompt.length > 0) {
     messages.push({
-      role: 'system',
-      content: request.systemPrompt
-    })
+      role: "system",
+      content: systemPrompt,
+    });
   }
 
   for (const message of normalizeAgentCoreMessagesForWire(request.messages)) {
-    if (message.role === 'user') {
+    if (message.role === "user") {
       messages.push({
-        role: 'user',
-        content: message.content
-      })
-      continue
+        role: "user",
+        content: message.content,
+      });
+      continue;
     }
-    if (message.role === 'tool') {
+    if (message.role === "tool") {
       messages.push({
-        role: 'tool',
+        role: "tool",
         content: message.content,
         tool_call_id: message.toolCallId,
-        name: message.name
-      })
-      continue
+        name: message.name,
+      });
+      continue;
     }
     messages.push({
-      role: 'assistant',
+      role: "assistant",
       content: message.content.length > 0 ? message.content : null,
       tool_calls: message.toolCalls?.map((call) => ({
         id: call.id,
-        type: 'function',
+        type: "function",
         function: {
           name: call.name,
-          arguments: stringifyAgentCoreToolCallInput(call)
-        }
-      }))
-    })
+          arguments: stringifyAgentCoreToolCallInput(call),
+        },
+      })),
+    });
   }
-  return messages
+  return messages;
 }
 
 // OpenAI 兼容端点路径通常是 base_url + /chat/completions。
 function openAICompletionUrl(baseUrl: string): string {
-  return `${baseUrl.replace(/\/$/, '')}/chat/completions`
+  return `${baseUrl.replace(/\/$/, "")}/chat/completions`;
 }
 
 // 构建 OpenAI 请求体。stream/complete 共用，避免协议字段漂移。
 function createOpenAIRequestBody(
   request: AgentCoreModelRequest,
   config: AgentCoreHttpModelConfig,
-  stream: boolean
+  stream: boolean,
 ): string {
   return JSON.stringify({
     model: config.model,
     messages: toOpenAIMessages(request),
     tools: request.tools.map((tool) => {
-      const schema = toAgentCoreWireToolSchema(tool)
+      const schema = toAgentCoreWireToolSchema(tool);
       return {
-        type: 'function',
+        type: "function",
         function: {
           name: schema.name,
           description: schema.description,
-          parameters: schema.parameters
-        }
-      }
+          parameters: schema.parameters,
+        },
+      };
     }),
     stream,
+    ...(stream
+      ? {
+          stream_options: {
+            include_usage: true,
+          },
+        }
+      : {}),
     temperature: config.temperature,
-    max_tokens: config.maxTokens
-  })
+    max_tokens: config.maxTokens,
+  });
 }
 
 // 创建 OpenAI-compatible adapter。OpenAI-compatible 端点都走这里。
 export function createAgentCoreOpenAIModelAdapter(
   config: AgentCoreHttpModelConfig,
-  fetchImpl: AgentCoreModelFetch = fetch
+  fetchImpl: AgentCoreModelFetch = fetch,
 ): AgentCoreModelAdapter {
   return {
     async complete(request: AgentCoreModelRequest): Promise<AgentCoreModelResponse> {
@@ -174,103 +198,110 @@ export function createAgentCoreOpenAIModelAdapter(
         fetchImpl,
         url: openAICompletionUrl(config.baseUrl),
         init: {
-          method: 'POST',
+          method: "POST",
           headers: {
             Authorization: `Bearer ${config.apiKey}`,
-            'Content-Type': 'application/json'
+            "Content-Type": "application/json",
           },
           body: createOpenAIRequestBody(request, config, false),
-          signal: request.signal
-        }
-      })
+          signal: request.signal,
+        },
+      });
       if (!response.ok) {
         throw createAgentCoreModelHttpError({
           message: await readOpenAIErrorMessage(
             response,
-            `OpenAI-compatible request failed: ${response.status}`
+            `OpenAI-compatible request failed: ${response.status}`,
           ),
-          status: response.status
-        })
+          status: response.status,
+        });
       }
-      const body = (await response.json()) as OpenAIChatCompletionResponse
-      const message = body.choices?.[0]?.message
+      const body = (await response.json()) as OpenAIChatCompletionResponse;
+      const message = body.choices?.[0]?.message;
       return {
-        content: message?.content ?? '',
+        content: message?.content ?? "",
         toolCalls: message?.tool_calls?.map((call, index) =>
           createAgentCoreToolCall({
             id: call.id,
             index,
-            name: call.function?.name ?? '',
-            arguments: call.function?.arguments ?? '{}'
-          })
-        )
-      }
+            name: call.function?.name ?? "",
+            arguments: call.function?.arguments ?? "{}",
+          }),
+        ),
+        usage: normalizeOpenAIModelUsage(body.usage),
+      };
     },
     async *stream(request: AgentCoreModelRequest): AsyncIterable<AgentCoreModelStreamEvent> {
       const response = await fetchAgentCoreModelResponse({
         fetchImpl,
         url: openAICompletionUrl(config.baseUrl),
         init: {
-          method: 'POST',
+          method: "POST",
           headers: {
             Authorization: `Bearer ${config.apiKey}`,
-            'Content-Type': 'application/json'
+            "Content-Type": "application/json",
           },
           body: createOpenAIRequestBody(request, config, true),
-          signal: request.signal
-        }
-      })
+          signal: request.signal,
+        },
+      });
       if (!response.ok) {
         throw createAgentCoreModelHttpError({
           message: await readOpenAIErrorMessage(
             response,
-            `OpenAI-compatible stream request failed: ${response.status}`
+            `OpenAI-compatible stream request failed: ${response.status}`,
           ),
-          status: response.status
-        })
+          status: response.status,
+        });
       }
 
-      const toolCalls = new Map<number, OpenAIStreamingToolCall>()
-      let streamDone = false
+      const toolCalls = new Map<number, OpenAIStreamingToolCall>();
+      let streamDone = false;
+      let usage: AgentCoreModelUsage | undefined;
       for await (const data of readAgentCoreSseData(response.body)) {
-        if (data.trim() === '[DONE]') {
-          streamDone = true
-          break
+        if (data.trim() === "[DONE]") {
+          streamDone = true;
+          break;
         }
         const chunk = parseAgentCoreStreamJsonEvent<OpenAIChatCompletionChunk>({
-          protocol: 'openai',
-          data
-        })
+          protocol: "openai",
+          data,
+        });
         if (chunk.error?.message !== undefined) {
-          throw new Error(chunk.error.message)
+          throw new Error(chunk.error.message);
         }
-        const delta = chunk.choices?.[0]?.delta
+        if (chunk.usage !== undefined) {
+          usage = normalizeOpenAIModelUsage(chunk.usage);
+          continue;
+        }
+        const delta = chunk.choices?.[0]?.delta;
         if (delta === undefined) {
-          continue
+          continue;
         }
         if (delta.content !== undefined && delta.content !== null && delta.content.length > 0) {
           yield {
-            type: 'text-delta',
-            content: delta.content
-          }
+            type: "text-delta",
+            content: delta.content,
+          };
         }
         mergeOpenAIToolCallDeltas({
           calls: toolCalls,
-          deltas: delta.tool_calls
-        })
+          deltas: delta.tool_calls,
+        });
       }
       if (!streamDone) {
-        yield* flushOpenAIToolCalls(toolCalls)
+        yield* flushOpenAIToolCalls(toolCalls);
         throw createAgentCoreModelProviderError({
-          message: 'openai stream ended before [DONE].',
-          retryable: true
-        })
+          message: "openai stream ended before [DONE].",
+          retryable: true,
+        });
       }
 
-      yield* flushOpenAIToolCalls(toolCalls)
+      yield* flushOpenAIToolCalls(toolCalls);
       yield {
-        type: 'message-end'
-      }
-    }
-  }
+        type: "message-end",
+        ...(usage === undefined ? {} : { usage }),
+      };
+    },
+  };
 }

@@ -26,7 +26,7 @@ export async function runMlloCliPrompt(args: {
       stderr: args.io.stderr,
     });
     const result = await consumeMlloCliAgentRun({
-      options: createMlloCliRunOptions({
+      options: await createMlloCliRunOptions({
         parsed: args.parsed,
         input: args.input,
         handlers: interaction.handlers,

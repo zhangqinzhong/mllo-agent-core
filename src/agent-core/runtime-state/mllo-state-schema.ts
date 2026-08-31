@@ -1,6 +1,29 @@
 import type { SyncDatabaseHandle } from "../../sqlite/sync-database";
 
-const MLLO_STATE_SCHEMA_VERSION = 8;
+export const MLLO_STATE_SCHEMA_VERSION = 9;
+
+export class MlloStateSchemaVersionError extends Error {
+  readonly code = "MLLO_STATE_SCHEMA_VERSION_UNSUPPORTED";
+  readonly foundVersion: number;
+  readonly supportedVersion: number;
+
+  constructor(foundVersion: number, supportedVersion: number = MLLO_STATE_SCHEMA_VERSION) {
+    super(
+      `Unsupported mllo state schema version ${foundVersion}; this runtime supports up to ${supportedVersion}.`,
+    );
+    this.name = "MlloStateSchemaVersionError";
+    this.foundVersion = foundVersion;
+    this.supportedVersion = supportedVersion;
+  }
+}
+
+export function assertMlloStateSchemaVersionSupported(db: SyncDatabaseHandle): number {
+  const currentVersion = getMlloStateSchemaVersion(db);
+  if (currentVersion > MLLO_STATE_SCHEMA_VERSION) {
+    throw new MlloStateSchemaVersionError(currentVersion);
+  }
+  return currentVersion;
+}
 
 // 读取表字段集合，迁移时用它做幂等判断，避免新库和旧库路径分叉。
 function getTableColumnNames(db: SyncDatabaseHandle, tableName: string): Set<string> {
@@ -65,6 +88,8 @@ function migrateWorkerToolPayloadBlob(db: SyncDatabaseHandle): void {
 
 // 创建 mllo state.sqlite 第一版表结构，SQLite 只存索引和当前状态。
 export function createMlloStateSchema(db: SyncDatabaseHandle): void {
+  const currentVersion = assertMlloStateSchemaVersionSupported(db);
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS threads (
       id TEXT PRIMARY KEY,
@@ -202,8 +227,46 @@ export function createMlloStateSchema(db: SyncDatabaseHandle): void {
       ON worker_tool_events(thread_id, created_at_ms);
     CREATE INDEX IF NOT EXISTS idx_mllo_worker_tool_events_worker
       ON worker_tool_events(worker_id, kind, created_at_ms);
+
+    CREATE TABLE IF NOT EXISTS interactions (
+      version INTEGER NOT NULL CHECK(version = 1),
+      id TEXT PRIMARY KEY,
+      thread_id TEXT NOT NULL,
+      request_key TEXT NOT NULL,
+      kind TEXT NOT NULL
+        CHECK(kind IN ('permission', 'elicitation')),
+      status TEXT NOT NULL
+        CHECK(status IN ('pending', 'resolved')),
+      call_id TEXT NOT NULL,
+      tool_name TEXT NOT NULL,
+      cwd TEXT NOT NULL,
+      transcript_path TEXT NOT NULL,
+      message_count INTEGER NOT NULL CHECK(message_count >= 0),
+      request_json TEXT NOT NULL,
+      resolution_json TEXT,
+      resolution_source TEXT
+        CHECK(resolution_source IS NULL OR resolution_source IN ('callback', 'external')),
+      request_entry_uuid TEXT NOT NULL,
+      resolution_entry_uuid TEXT,
+      created_at_ms INTEGER NOT NULL,
+      resolved_at_ms INTEGER,
+      updated_at_ms INTEGER NOT NULL,
+      CHECK(
+        (status = 'pending' AND resolution_json IS NULL AND resolution_source IS NULL
+          AND resolution_entry_uuid IS NULL AND resolved_at_ms IS NULL)
+        OR
+        (status = 'resolved' AND resolution_json IS NOT NULL AND resolution_source IS NOT NULL
+          AND resolution_entry_uuid IS NOT NULL AND resolved_at_ms IS NOT NULL)
+      )
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_mllo_interactions_pending
+      ON interactions(status, created_at_ms);
+    CREATE INDEX IF NOT EXISTS idx_mllo_interactions_thread
+      ON interactions(thread_id, created_at_ms);
+    CREATE INDEX IF NOT EXISTS idx_mllo_interactions_request_key
+      ON interactions(thread_id, request_key);
   `);
-  const currentVersion = getMlloStateSchemaVersion(db);
   if (currentVersion < 2) {
     migrateThreadsResumeStats(db);
   }

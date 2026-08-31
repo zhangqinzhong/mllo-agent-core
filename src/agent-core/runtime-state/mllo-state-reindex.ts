@@ -1,8 +1,9 @@
-import { AgentCoreJsonlSessionStore } from '../session/agent-core-jsonl-session-store'
-import { readAgentCoreSessionIndex } from '../session/agent-core-session-index'
-import type { AgentCoreSessionEntry } from '../session/agent-core-session-types'
-import { syncAgentCoreRunProgressState } from '../runtime/agent-core-run-state-events'
-import { MlloStateStore } from './mllo-state-store'
+import { AgentCoreJsonlSessionStore } from "../session/agent-core-jsonl-session-store";
+import { readAgentCoreSessionIndex } from "../session/agent-core-session-index";
+import type { AgentCoreSessionEntry } from "../session/agent-core-session-types";
+import { syncAgentCoreRunProgressState } from "../runtime/agent-core-run-state-events";
+import { AGENT_CORE_INTERACTION_SCHEMA_VERSION } from "../interactions/agent-core-interaction-types";
+import { MlloStateStore } from "./mllo-state-store";
 import {
   applyMlloBudgetToThreadDraft,
   applyMlloMessageToThreadDraft,
@@ -10,54 +11,125 @@ import {
   applyMlloThreadStateSnapshot,
   createMlloReindexThreadDraft,
   mlloThreadDraftToRecord,
-  parseMlloReindexTimestampMs
-} from './mllo-state-reindex-thread-draft'
+  parseMlloReindexTimestampMs,
+} from "./mllo-state-reindex-thread-draft";
 
 export type MlloStateReindexOptions = {
-  configDir: string
-  stateDbPath?: string
-  stateStore?: MlloStateStore
-  sessionIds?: readonly string[]
-  reset?: boolean
-}
+  configDir: string;
+  stateDbPath?: string;
+  stateStore?: MlloStateStore;
+  sessionIds?: readonly string[];
+  reset?: boolean;
+};
 
 export type MlloStateReindexResult = {
-  sessionsSeen: number
-  indexedThreads: number
-  indexedThreadEdges: number
-  indexedTasks: number
-  indexedTeamMembers: number
-  indexedCheckpointRestores: number
-  indexedWorkerToolEvents: number
+  sessionsSeen: number;
+  indexedThreads: number;
+  indexedThreadEdges: number;
+  indexedTasks: number;
+  indexedTeamMembers: number;
+  indexedCheckpointRestores: number;
+  indexedWorkerToolEvents: number;
+  indexedInteractions: number;
+  pendingInteractions: number;
   skippedSessions: {
-    sessionId: string
-    reason: string
-  }[]
+    sessionId: string;
+    reason: string;
+  }[];
+};
+
+function indexInteractionRequest(args: {
+  stateStore: MlloStateStore;
+  transcriptPath: string;
+  entry: Extract<AgentCoreSessionEntry, { kind: "interaction-request-event" }>;
+}): void {
+  if (args.entry.version > AGENT_CORE_INTERACTION_SCHEMA_VERSION) {
+    throw new Error(
+      `Unsupported Agent Core interaction schema version ${args.entry.version}; ` +
+        `this runtime supports up to ${AGENT_CORE_INTERACTION_SCHEMA_VERSION}.`,
+    );
+  }
+  const createdAtMs = parseMlloReindexTimestampMs(args.entry.timestamp);
+  args.stateStore.upsertInteraction({
+    version: args.entry.version,
+    id: args.entry.interactionId,
+    threadId: args.entry.sessionId,
+    requestKey: args.entry.requestKey,
+    kind: args.entry.request.kind,
+    status: "pending",
+    callId: args.entry.request.call.id,
+    toolName: args.entry.request.call.name,
+    cwd: args.entry.cwd,
+    transcriptPath: args.transcriptPath,
+    messageCount: args.entry.messageCount,
+    request: args.entry.request,
+    requestEntryUuid: args.entry.uuid,
+    createdAtMs,
+    updatedAtMs: createdAtMs,
+  });
+}
+
+function indexInteractionResolution(args: {
+  stateStore: MlloStateStore;
+  entry:
+    | Extract<AgentCoreSessionEntry, { kind: "permission-event"; source?: "tool" }>
+    | Extract<AgentCoreSessionEntry, { kind: "elicitation-event" }>;
+}): void {
+  if (args.entry.interactionId === undefined) {
+    return;
+  }
+  const interaction = args.stateStore.getInteraction(args.entry.interactionId);
+  if (interaction === undefined) {
+    return;
+  }
+  const resolution =
+    args.entry.kind === "permission-event"
+      ? {
+          kind: "permission" as const,
+          decision: args.entry.response,
+        }
+      : {
+          kind: "elicitation" as const,
+          decision: args.entry.response,
+        };
+  if (resolution.kind !== interaction.kind) {
+    return;
+  }
+  const resolvedAtMs = parseMlloReindexTimestampMs(args.entry.timestamp);
+  args.stateStore.upsertInteraction({
+    ...interaction,
+    status: "resolved",
+    resolution,
+    resolutionSource: args.entry.resolutionSource ?? "external",
+    resolutionEntryUuid: args.entry.uuid,
+    resolvedAtMs,
+    updatedAtMs: resolvedAtMs,
+  });
 }
 
 function indexWorkerToolEvent(args: {
-  stateStore: MlloStateStore
-  entry: Extract<AgentCoreSessionEntry, { kind: 'worker-tool-event' | 'worker-tool-result-event' }>
+  stateStore: MlloStateStore;
+  entry: Extract<AgentCoreSessionEntry, { kind: "worker-tool-event" | "worker-tool-result-event" }>;
 }): void {
-  if (args.entry.kind === 'worker-tool-event') {
+  if (args.entry.kind === "worker-tool-event") {
     args.stateStore.upsertWorkerToolEvent({
       id: args.entry.uuid,
       threadId: args.entry.sessionId,
-      kind: 'use',
+      kind: "use",
       workerId: args.entry.tool.workerId,
       ...(args.entry.tool.invocationId === undefined
         ? {}
         : { invocationId: args.entry.tool.invocationId }),
       toolName: args.entry.tool.name,
       payload: args.entry.tool.input,
-      createdAtMs: parseMlloReindexTimestampMs(args.entry.timestamp)
-    })
-    return
+      createdAtMs: parseMlloReindexTimestampMs(args.entry.timestamp),
+    });
+    return;
   }
   args.stateStore.upsertWorkerToolEvent({
     id: args.entry.uuid,
     threadId: args.entry.sessionId,
-    kind: 'result',
+    kind: "result",
     workerId: args.entry.result.workerId,
     ...(args.entry.result.invocationId === undefined
       ? {}
@@ -80,17 +152,21 @@ function indexWorkerToolEvent(args: {
     ...(args.entry.result.outputBlobBytes === undefined
       ? {}
       : { payloadBlobBytes: args.entry.result.outputBlobBytes }),
-    createdAtMs: parseMlloReindexTimestampMs(args.entry.timestamp)
-  })
+    createdAtMs: parseMlloReindexTimestampMs(args.entry.timestamp),
+  });
 }
 
 function indexCheckpointRestoreEvent(args: {
-  stateStore: MlloStateStore
-  entry: Extract<AgentCoreSessionEntry, { kind: 'checkpoint-restore-event' }>
+  stateStore: MlloStateStore;
+  entry: Extract<AgentCoreSessionEntry, { kind: "checkpoint-restore-event" }>;
 }): void {
-  const restoredCount = args.entry.restore.files.filter((file) => file.action === 'restored').length
-  const deletedCount = args.entry.restore.files.filter((file) => file.action === 'deleted').length
-  const conflictCount = args.entry.restore.files.filter((file) => file.action === 'conflict').length
+  const restoredCount = args.entry.restore.files.filter(
+    (file) => file.action === "restored",
+  ).length;
+  const deletedCount = args.entry.restore.files.filter((file) => file.action === "deleted").length;
+  const conflictCount = args.entry.restore.files.filter(
+    (file) => file.action === "conflict",
+  ).length;
   args.stateStore.upsertCheckpointRestore(
     {
       id: args.entry.uuid,
@@ -102,132 +178,154 @@ function indexCheckpointRestoreEvent(args: {
       restoredCount,
       deletedCount,
       conflictCount,
-      createdAtMs: parseMlloReindexTimestampMs(args.entry.timestamp)
+      createdAtMs: parseMlloReindexTimestampMs(args.entry.timestamp),
     },
     args.entry.restore.files.map((file) => {
       const record = {
         restoreId: args.entry.uuid,
         path: file.path,
         resolvedPath: file.resolvedPath,
-        action: file.action
-      }
+        action: file.action,
+      };
       return {
         ...record,
         ...(file.reason !== undefined ? { reason: file.reason } : {}),
-        ...(file.restoredAt !== undefined ? { restoredAt: file.restoredAt } : {})
-      }
-    })
-  )
+        ...(file.restoredAt !== undefined ? { restoredAt: file.restoredAt } : {}),
+      };
+    }),
+  );
 }
 
 // 读取一个 transcript 并重放成 SQLite 当前态。坏 transcript 由调用方记录 skipped。
 async function reindexSessionTranscript(args: {
-  store: AgentCoreJsonlSessionStore
-  stateStore: MlloStateStore
-  transcriptPath: string
-  sessionId: string
-  cwd: string
+  store: AgentCoreJsonlSessionStore;
+  stateStore: MlloStateStore;
+  transcriptPath: string;
+  sessionId: string;
+  cwd: string;
 }): Promise<void> {
   const entries = await args.store.readSession({
     sessionId: args.sessionId,
     cwd: args.cwd,
-    projectDir: '',
-    transcriptPath: args.transcriptPath
-  })
+    projectDir: "",
+    transcriptPath: args.transcriptPath,
+  });
   const metadata = entries.find(
-    (entry): entry is Extract<AgentCoreSessionEntry, { kind: 'session-metadata' }> =>
-      entry.kind === 'session-metadata'
-  )
+    (entry): entry is Extract<AgentCoreSessionEntry, { kind: "session-metadata" }> =>
+      entry.kind === "session-metadata",
+  );
   const draft =
-    metadata === undefined ? undefined : createMlloReindexThreadDraft(metadata, args.transcriptPath)
+    metadata === undefined
+      ? undefined
+      : createMlloReindexThreadDraft(metadata, args.transcriptPath);
   if (draft === undefined) {
-    throw new Error('session metadata entry is missing')
+    throw new Error("session metadata entry is missing");
   }
 
   for (const entry of entries) {
-    if (entry.kind === 'message') {
-      applyMlloMessageToThreadDraft(draft, entry)
-      continue
+    if (entry.kind === "message") {
+      applyMlloMessageToThreadDraft(draft, entry);
+      continue;
     }
-    if (entry.kind === 'budget-event') {
-      applyMlloBudgetToThreadDraft(draft, entry)
-      continue
+    if (entry.kind === "budget-event") {
+      applyMlloBudgetToThreadDraft(draft, entry);
+      continue;
     }
-    if (entry.kind === 'thread-state-event') {
-      applyMlloThreadStateSnapshot(draft, entry.snapshot)
-      continue
+    if (entry.kind === "thread-state-event") {
+      applyMlloThreadStateSnapshot(draft, entry.snapshot);
+      continue;
     }
-    if (entry.kind === 'thread-metadata-event') {
-      applyMlloThreadMetadataPatch(draft, entry)
-      continue
+    if (entry.kind === "thread-metadata-event") {
+      applyMlloThreadMetadataPatch(draft, entry);
+      continue;
     }
-    if (entry.kind === 'thread-edge-event') {
-      args.stateStore.upsertThreadEdge(entry.edge)
-      draft.updatedAtMs = parseMlloReindexTimestampMs(entry.timestamp)
-      continue
+    if (entry.kind === "thread-edge-event") {
+      args.stateStore.upsertThreadEdge(entry.edge);
+      draft.updatedAtMs = parseMlloReindexTimestampMs(entry.timestamp);
+      continue;
     }
-    if (entry.kind === 'checkpoint-restore-event') {
+    if (entry.kind === "checkpoint-restore-event") {
       indexCheckpointRestoreEvent({
         stateStore: args.stateStore,
-        entry
-      })
-      draft.updatedAtMs = parseMlloReindexTimestampMs(entry.timestamp)
-      continue
+        entry,
+      });
+      draft.updatedAtMs = parseMlloReindexTimestampMs(entry.timestamp);
+      continue;
     }
-    if (entry.kind === 'worker-tool-event' || entry.kind === 'worker-tool-result-event') {
+    if (entry.kind === "worker-tool-event" || entry.kind === "worker-tool-result-event") {
       indexWorkerToolEvent({
         stateStore: args.stateStore,
-        entry
-      })
-      draft.updatedAtMs = parseMlloReindexTimestampMs(entry.timestamp)
-      continue
+        entry,
+      });
+      draft.updatedAtMs = parseMlloReindexTimestampMs(entry.timestamp);
+      continue;
     }
-    if (entry.kind === 'timeline-event') {
+    if (entry.kind === "interaction-request-event") {
+      indexInteractionRequest({
+        stateStore: args.stateStore,
+        transcriptPath: args.transcriptPath,
+        entry,
+      });
+      draft.updatedAtMs = parseMlloReindexTimestampMs(entry.timestamp);
+      continue;
+    }
+    if (
+      (entry.kind === "permission-event" && entry.source !== "worker") ||
+      entry.kind === "elicitation-event"
+    ) {
+      indexInteractionResolution({
+        stateStore: args.stateStore,
+        entry,
+      });
+      draft.updatedAtMs = parseMlloReindexTimestampMs(entry.timestamp);
+      continue;
+    }
+    if (entry.kind === "timeline-event") {
       syncAgentCoreRunProgressState({
         stateStore: args.stateStore,
         threadId: args.sessionId,
         cwd: args.cwd,
         event: entry.event,
-        workers: []
-      })
-      draft.updatedAtMs = parseMlloReindexTimestampMs(entry.timestamp)
+        workers: [],
+      });
+      draft.updatedAtMs = parseMlloReindexTimestampMs(entry.timestamp);
     }
   }
 
-  args.stateStore.upsertThread(mlloThreadDraftToRecord(draft))
+  args.stateStore.upsertThread(mlloThreadDraftToRecord(draft));
 }
 
 // 打开 state store。调用方传入 store 时不由 reindex 关闭，避免测试和批处理复用连接被误关。
 function openReindexStateStore(options: MlloStateReindexOptions): {
-  stateStore: MlloStateStore
-  shouldClose: boolean
+  stateStore: MlloStateStore;
+  shouldClose: boolean;
 } {
   if (options.stateStore !== undefined) {
     return {
       stateStore: options.stateStore,
-      shouldClose: false
-    }
+      shouldClose: false,
+    };
   }
   if (options.stateDbPath === undefined) {
-    throw new Error('mllo stateDbPath is required when stateStore is not provided.')
+    throw new Error("mllo stateDbPath is required when stateStore is not provided.");
   }
   return {
     stateStore: new MlloStateStore({
-      dbPath: options.stateDbPath
+      dbPath: options.stateDbPath,
     }),
-    shouldClose: true
-  }
+    shouldClose: true,
+  };
 }
 
 // 从 session index 重建 mllo state.sqlite。JSONL 是事实来源，SQLite 只是可再生索引。
 export async function reindexMlloState(
-  options: MlloStateReindexOptions
+  options: MlloStateReindexOptions,
 ): Promise<MlloStateReindexResult> {
-  const { stateStore, shouldClose } = openReindexStateStore(options)
-  const sessionIds = new Set(options.sessionIds ?? [])
+  const { stateStore, shouldClose } = openReindexStateStore(options);
+  const sessionIds = new Set(options.sessionIds ?? []);
   const sessionStore = new AgentCoreJsonlSessionStore({
-    configDir: options.configDir
-  })
+    configDir: options.configDir,
+  });
   const result: MlloStateReindexResult = {
     sessionsSeen: 0,
     indexedThreads: 0,
@@ -236,65 +334,76 @@ export async function reindexMlloState(
     indexedTeamMembers: 0,
     indexedCheckpointRestores: 0,
     indexedWorkerToolEvents: 0,
-    skippedSessions: []
-  }
+    indexedInteractions: 0,
+    pendingInteractions: 0,
+    skippedSessions: [],
+  };
 
   try {
     if (options.reset === true) {
-      stateStore.clearDerivedState()
+      stateStore.clearDerivedState();
     }
-    const sessionIndex = await readAgentCoreSessionIndex(options.configDir)
+    const sessionIndex = await readAgentCoreSessionIndex(options.configDir);
     for (const session of sessionIndex) {
       if (sessionIds.size > 0 && !sessionIds.has(session.sessionId)) {
-        continue
+        continue;
       }
-      result.sessionsSeen += 1
+      result.sessionsSeen += 1;
       try {
         await reindexSessionTranscript({
           store: sessionStore,
           stateStore,
           transcriptPath: session.transcriptPath,
           sessionId: session.sessionId,
-          cwd: session.cwd
-        })
-        result.indexedThreads += 1
+          cwd: session.cwd,
+        });
+        result.indexedThreads += 1;
       } catch (error) {
         result.skippedSessions.push({
           sessionId: session.sessionId,
-          reason: error instanceof Error ? error.message : String(error)
-        })
+          reason: error instanceof Error ? error.message : String(error),
+        });
       }
     }
     result.indexedTasks = sessionIndex
       .filter((session) => sessionIds.size === 0 || sessionIds.has(session.sessionId))
       .reduce(
         (count, session) => count + stateStore.listTasksForThread(session.sessionId).length,
-        0
-      )
+        0,
+      );
     result.indexedThreadEdges = sessionIndex
       .filter((session) => sessionIds.size === 0 || sessionIds.has(session.sessionId))
-      .reduce((count, session) => count + stateStore.listThreadEdges(session.sessionId).length, 0)
+      .reduce((count, session) => count + stateStore.listThreadEdges(session.sessionId).length, 0);
     result.indexedTeamMembers = sessionIndex
       .filter((session) => sessionIds.size === 0 || sessionIds.has(session.sessionId))
-      .reduce((count, session) => count + stateStore.listTeamMembers(session.sessionId).length, 0)
+      .reduce((count, session) => count + stateStore.listTeamMembers(session.sessionId).length, 0);
     result.indexedCheckpointRestores = sessionIndex
       .filter((session) => sessionIds.size === 0 || sessionIds.has(session.sessionId))
       .reduce(
         (count, session) =>
           count + stateStore.listCheckpointRestoresForThread(session.sessionId).length,
-        0
-      )
+        0,
+      );
     result.indexedWorkerToolEvents = sessionIndex
       .filter((session) => sessionIds.size === 0 || sessionIds.has(session.sessionId))
       .reduce(
         (count, session) =>
           count + stateStore.listWorkerToolEventsForThread(session.sessionId).length,
-        0
-      )
-    return result
+        0,
+      );
+    result.indexedInteractions = sessionIndex
+      .filter((session) => sessionIds.size === 0 || sessionIds.has(session.sessionId))
+      .reduce(
+        (count, session) => count + stateStore.listInteractionsForThread(session.sessionId).length,
+        0,
+      );
+    result.pendingInteractions = stateStore.listPendingInteractions({
+      limit: Number.MAX_SAFE_INTEGER,
+    }).length;
+    return result;
   } finally {
     if (shouldClose) {
-      stateStore.close()
+      stateStore.close();
     }
   }
 }

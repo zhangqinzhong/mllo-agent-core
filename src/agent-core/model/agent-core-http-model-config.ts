@@ -2,6 +2,8 @@ import type { AgentCorePromptProfile } from "../context/agent-core-prompt-profil
 
 export type AgentCoreHttpModelProtocol = "anthropic" | "openai";
 
+export type AgentCoreAnthropicAuthHeader = "x-api-key" | "authorization";
+
 export type AgentCoreHttpModelConfig = {
   name?: string;
   protocol: AgentCoreHttpModelProtocol;
@@ -9,8 +11,10 @@ export type AgentCoreHttpModelConfig = {
   apiKey: string;
   model: string;
   maxTokens?: number;
+  contextWindowTokens?: number;
   temperature?: number;
   anthropicVersion?: string;
+  anthropicAuthHeader?: AgentCoreAnthropicAuthHeader;
   promptProfile?: AgentCorePromptProfile;
 };
 

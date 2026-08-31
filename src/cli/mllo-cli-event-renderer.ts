@@ -64,7 +64,8 @@ function renderToolResult(call: AgentCoreToolCall, result: AgentCoreToolResult):
     return `[mllo] tool ${call.name} failed: ${previewText(result.content, 220)}`;
   }
   if (result.outputTruncated === true) {
-    return `[mllo] tool ${call.name} output truncated: ${result.outputMaxChars}/${result.outputOriginalChars} chars`;
+    const location = result.outputBlobPath === undefined ? "" : `, saved: ${result.outputBlobPath}`;
+    return `[mllo] tool ${call.name} output truncated: ${result.outputMaxChars}/${result.outputOriginalChars} chars${location}`;
   }
   return null;
 }
@@ -90,6 +91,22 @@ function renderWorkerEvent(event: AgentCoreWorkerEvent): string | null {
     case "worker-error":
       return `[mllo] worker ${event.workerId} error: ${event.message}`;
   }
+}
+
+function renderContinuation(
+  event: Extract<AgentCoreQueryEvent, { type: "continue" }>,
+): string | null {
+  if (event.continuation.reason === "next_turn") {
+    return null;
+  }
+  return `[mllo] continue: ${event.continuation.reason}`;
+}
+
+function renderTerminal(event: Extract<AgentCoreQueryEvent, { type: "terminal" }>): string | null {
+  if (event.terminal.reason === "completed") {
+    return null;
+  }
+  return `[mllo] terminal: ${event.terminal.reason}`;
 }
 
 export class MlloCliEventRenderer {
@@ -161,6 +178,20 @@ export class MlloCliEventRenderer {
 
   private renderTextEvent(event: AgentCoreQueryEvent): void {
     switch (event.type) {
+      case "continue": {
+        const line = renderContinuation(event);
+        if (line !== null) {
+          writeCliLine(this.stderr, line);
+        }
+        return;
+      }
+      case "terminal": {
+        const line = renderTerminal(event);
+        if (line !== null) {
+          writeCliLine(this.stderr, line);
+        }
+        return;
+      }
       case "turn-start":
         return;
       case "assistant-message":

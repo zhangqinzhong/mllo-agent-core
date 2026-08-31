@@ -8,7 +8,16 @@ import {
 } from "./agent-core-duplicate-tool-call";
 import { runExecutableAgentCoreToolCallsStep } from "./agent-core-executable-tool-calls-step";
 import { createAgentCoreRepeatedToolFailureResult } from "./agent-core-repeated-tool-failure";
+import {
+  createAgentCoreToolBatchSummary,
+  type AgentCoreToolBatchCompletedItem,
+} from "./agent-core-tool-batch-summary";
 import { createAgentCoreToolFailureFeedback } from "./agent-core-tool-failure-feedback";
+import {
+  applyAgentCoreToolResultTurnBudget,
+  createAgentCoreToolResultTurnBudget,
+  type AgentCoreToolResultTurnBudget,
+} from "./agent-core-tool-result-turn-budget";
 import type {
   AgentCoreToolCall,
   AgentCoreToolExecutionResult,
@@ -72,11 +81,16 @@ function toolExecutionResultContent(
         },
       });
     case "permission-required":
-    case "permission-denied":
       return {
         content: execution.decision.reason,
         isError: true,
         errorKind: "tool-error",
+      };
+    case "permission-denied":
+      return {
+        content: execution.decision.reason,
+        isError: true,
+        errorKind: "permission-denied",
       };
   }
 }
@@ -128,6 +142,8 @@ async function* handleToolCompletion(args: {
   call: AgentCoreToolCall;
   execution: AgentCoreToolExecutionResult;
   middlewareChain: AgentCoreMiddlewareChain;
+  resultBudget: AgentCoreToolResultTurnBudget;
+  completedItems: AgentCoreToolBatchCompletedItem[];
   remainingCalls?: readonly AgentCoreToolCall[];
 }): AsyncGenerator<AgentCoreQueryEvent, AgentCoreQueryLoopResult | null> {
   const remainingCalls = args.remainingCalls ?? [];
@@ -148,10 +164,30 @@ async function* handleToolCompletion(args: {
   }
 
   if (execution.status === "permission-denied") {
+    const result = await applyAgentCoreToolResultTurnBudget({
+      budget: args.resultBudget,
+      call,
+      storeToolResultBlob: queryArgs.storeToolResultBlob,
+      result: {
+        content: execution.decision.reason,
+        isError: true,
+        errorKind: "permission-denied",
+      },
+    });
+    appendToolMessage(messages, call, result);
+    args.completedItems.push({
+      call,
+      result,
+    });
     yield {
       type: "permission-denied",
       call,
       decision: execution.decision,
+    };
+    yield {
+      type: "tool-result",
+      call,
+      result,
     };
     return {
       status: "denied",
@@ -203,8 +239,18 @@ async function* handleToolCompletion(args: {
     };
   }
 
-  const result = toolExecutionResultContent(call, execution);
+  const result = await applyAgentCoreToolResultTurnBudget({
+    budget: args.resultBudget,
+    call,
+    maxResultSizeChars: execution.status === "ok" ? execution.maxResultSizeChars : undefined,
+    storeToolResultBlob: queryArgs.storeToolResultBlob,
+    result: toolExecutionResultContent(call, execution),
+  });
   appendToolMessage(messages, call, result);
+  args.completedItems.push({
+    call,
+    result,
+  });
   await args.middlewareChain.afterTool({
     queryArgs,
     messages,
@@ -220,6 +266,28 @@ async function* handleToolCompletion(args: {
   return null;
 }
 
+async function* maybeYieldToolBatchSummary(args: {
+  queryArgs: AgentCoreQueryLoopArgs;
+  turn: number;
+  completedItems: readonly AgentCoreToolBatchCompletedItem[];
+  lastAssistantText?: string;
+}): AsyncGenerator<AgentCoreQueryEvent> {
+  const summary = await createAgentCoreToolBatchSummary({
+    completedItems: args.completedItems,
+    model: args.queryArgs.toolSummaryModel ?? args.queryArgs.model,
+    signal: args.queryArgs.signal,
+    lastAssistantText: args.lastAssistantText,
+  });
+  if (summary === undefined) {
+    return;
+  }
+  yield {
+    type: "tool-batch-summary",
+    turn: args.turn,
+    summary,
+  };
+}
+
 // 运行一组工具调用。编排层负责并发/串行，query loop 只处理事件和终态。
 export async function* runToolCallsStep(args: {
   queryArgs: AgentCoreQueryLoopArgs;
@@ -230,6 +298,11 @@ export async function* runToolCallsStep(args: {
   turn: number;
 }): AsyncGenerator<AgentCoreQueryEvent, AgentCoreQueryLoopResult | null> {
   const duplicateTracker = createAgentCoreDuplicateToolCallTracker();
+  const resultBudget = createAgentCoreToolResultTurnBudget();
+  const completedItems: AgentCoreToolBatchCompletedItem[] = [];
+  const lastAssistantText = [...args.messages]
+    .reverse()
+    .find((message) => message.role === "assistant")?.content;
   const remainingCallsAfter = (call: AgentCoreToolCall): readonly AgentCoreToolCall[] => {
     const index = args.calls.findIndex((candidate) => candidate.id === call.id);
     return index >= 0 ? args.calls.slice(index + 1) : [];
@@ -245,6 +318,8 @@ export async function* runToolCallsStep(args: {
       call: input.call,
       execution: input.execution,
       middlewareChain: args.middlewareChain,
+      resultBudget,
+      completedItems,
       remainingCalls: input.remainingCalls,
     });
 
@@ -267,9 +342,17 @@ export async function* runToolCallsStep(args: {
       call,
       execution: syntheticExecution ?? (await preExecuted.execution),
       middlewareChain: args.middlewareChain,
+      resultBudget,
+      completedItems,
       remainingCalls: remainingCallsAfter(call),
     });
     if (result !== null) {
+      yield* maybeYieldToolBatchSummary({
+        queryArgs: args.queryArgs,
+        turn: args.turn,
+        completedItems,
+        lastAssistantText,
+      });
       return result;
     }
   }
@@ -282,7 +365,7 @@ export async function* runToolCallsStep(args: {
     }) &&
     !remainingCalls.some((call) => repeatedToolFailureExecution(args.messages, call) !== undefined)
   ) {
-    return yield* runExecutableAgentCoreToolCallsStep({
+    const result = yield* runExecutableAgentCoreToolCallsStep({
       queryArgs: args.queryArgs,
       messages: args.messages,
       calls: remainingCalls,
@@ -290,6 +373,13 @@ export async function* runToolCallsStep(args: {
       remainingCallsAfter,
       onToolComplete,
     });
+    yield* maybeYieldToolBatchSummary({
+      queryArgs: args.queryArgs,
+      turn: args.turn,
+      completedItems,
+      lastAssistantText,
+    });
+    return result;
   }
 
   for (const call of remainingCalls) {
@@ -309,9 +399,17 @@ export async function* runToolCallsStep(args: {
         call,
         execution: syntheticExecution,
         middlewareChain: args.middlewareChain,
+        resultBudget,
+        completedItems,
         remainingCalls: remainingCallsAfter(call),
       });
       if (result !== null) {
+        yield* maybeYieldToolBatchSummary({
+          queryArgs: args.queryArgs,
+          turn: args.turn,
+          completedItems,
+          lastAssistantText,
+        });
         return result;
       }
       continue;
@@ -325,9 +423,21 @@ export async function* runToolCallsStep(args: {
       onToolComplete,
     });
     if (result !== null) {
+      yield* maybeYieldToolBatchSummary({
+        queryArgs: args.queryArgs,
+        turn: args.turn,
+        completedItems,
+        lastAssistantText,
+      });
       return result;
     }
   }
 
+  yield* maybeYieldToolBatchSummary({
+    queryArgs: args.queryArgs,
+    turn: args.turn,
+    completedItems,
+    lastAssistantText,
+  });
   return null;
 }

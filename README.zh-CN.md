@@ -83,15 +83,21 @@ node dist/src/cli/mllo-cli.js observe
 ```sh
 mllo config path
 mllo run "检查 package.json" --output-format stream-json
+mllo run --continue "继续上一个任务"
 mllo observe --port 43110
 ```
 
 `text` 给人看，`json` 输出最终 run envelope，`stream-json` 每行输出一个事件，最后再输出最终 envelope。GUI 和 benchmark 可以用这个事件流做可观测性，不需要依赖桌面界面。
+`--continue` 会恢复所选 `--cwd` 下最近的未归档会话，优先读
+`state.sqlite`，缺失时退回 `session_index.jsonl`。
+`mllo chat` 会预加载所选 `--cwd` 的输入历史，并把当前或恢复会话的 prompt
+排在前面。
 
-`mllo observe` 会启动一个只读本地 Web Observer，默认绑定
+`mllo observe` 会启动一个只读本地 observer API，默认绑定
 `127.0.0.1`。它读取 `state.sqlite`、`session_index.jsonl`、transcript
-JSONL 和 `dump-prompts` 文件，用来查看 sessions、timeline、prompt dump、
-tool events 和脱敏后的原始 JSON。它不会执行工具，也不会参与 agent 决策。
+JSONL 和 `dump-prompts` 文件，并通过 JSON endpoint 暴露 sessions、timeline、
+prompt dump、tool events 和脱敏后的原始 JSON。它不会执行工具，也不会参与
+agent 决策。
 
 ## 快速开始
 
@@ -122,6 +128,10 @@ for await (const event of runAgentCoreController({
 
 `runAgentCoreController()` 是 async generator。宿主应用可以把事件渲染成 CLI 输出、GUI timeline、日志、WebSocket 消息或测试断言。
 
+宿主可以用 `additionalTools` 注入领域工具；设置 `includeBaseTools: false` 后只运行宿主工具，适合资料整理、业务自动化等不需要通用代码工具的产品。
+
+产品级行为通过结构化 `additionalSystemPromptBlocks` 注入；这些块会进入 session snapshot，并保留调用方声明的 Prompt Cache scope。
+
 ## 配置
 
 可以直接传入 provider：
@@ -133,9 +143,13 @@ modelProvider: {
   apiKey: process.env.MODEL_API_KEY!,
   model: 'agent-model',
   maxTokens: 4096,
+  contextWindowTokens: 200000,
   temperature: 0.1
 }
 ```
+
+如果 Anthropic-compatible 网关要求 Bearer token，可设置
+`anthropicAuthHeader: 'authorization'`；默认仍使用标准 `x-api-key`。
 
 也可以从 mllo config 文件加载：
 
@@ -149,13 +163,14 @@ modelProvider: {
       "baseUrl": "http://127.0.0.1:1234/v1",
       "apiKey": "local-key",
       "model": "local-model",
+      "contextWindowTokens": 65536,
       "promptProfile": "local-compact"
     }
   ]
 }
 ```
 
-小上下文本地模型建议用 `promptProfile: "local-compact"`。大上下文模型可以使用默认 full profile。
+小上下文本地模型建议用 `promptProfile: "local-compact"`。大上下文模型可以使用默认 full profile；如果 provider 明确暴露上下文窗口，就填 `contextWindowTokens`。
 
 ## Claude / Codex Worker
 
@@ -216,6 +231,7 @@ archived_sessions/
 memories/
 skills/
 dump-prompts/
+external-traces/
 ```
 
 ## 可观测性
@@ -235,6 +251,22 @@ MLLO_DUMP_PROMPTS=1
 ```
 
 这个文件适合排查模型协议、工具 schema 膨胀、上下文增长、流式响应错误和异常模型行为。
+
+`mllo observe` 也可以启动本地 trace proxy，用来调试外部 agent 或宿主进程。
+当前支持 Anthropic `/v1/messages`、OpenAI-compatible `/v1/chat/completions`
+和 OpenAI Responses `/v1/responses`：
+
+```sh
+mllo observe --anthropic-trace-proxy --trace-proxy-port 43111
+export ANTHROPIC_BASE_URL=http://127.0.0.1:43111
+
+mllo observe --openai-trace-proxy --openai-trace-proxy-port 43112
+export OPENAI_BASE_URL=http://127.0.0.1:43112/v1
+```
+
+这个 proxy 会把请求透传到真实上游，同时把脱敏后的摘要写到
+`~/.mllo/external-traces/<source>.jsonl`。只有明确需要本地保存脱敏后的
+request/response body 时，才加 `--trace-capture-bodies`。
 
 ## 架构
 

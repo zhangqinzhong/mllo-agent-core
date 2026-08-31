@@ -5,16 +5,17 @@ import {
   isAgentCoreRetryableModelError,
 } from "../model/agent-core-model-error-classification";
 import {
-  createAgentCoreToolCallIdState,
+  createAgentCoreToolCallIdStateFromMessages,
   ensureAgentCoreToolCallUniqueId,
-  ensureAgentCoreToolCallsUniqueIds,
 } from "../model/agent-core-model-wire";
 import {
   createPreExecutedToolSignal,
   type PreExecutedToolCall,
 } from "./agent-core-pre-executed-tool-call";
+import { isAgentCoreStreamingToolCallReadyForPreExecution } from "./agent-core-streaming-tool-call-readiness";
 import { createAgentCoreToolCallSignature } from "./agent-core-tool-call-signature";
 import { createAgentCoreRepeatedToolFailureResult } from "./agent-core-repeated-tool-failure";
+import { repairAgentCoreToolCallNameAlias } from "../tools/agent-core-tool-name-repair";
 import type { AgentCoreToolCall } from "../tools/agent-core-tool-types";
 import type {
   AgentCoreMessage,
@@ -22,6 +23,7 @@ import type {
   AgentCoreQueryEvent,
   AgentCoreQueryLoopArgs,
 } from "./agent-core-query-types";
+import type { AgentCoreModelUsage } from "../model/agent-core-model-usage";
 
 export type AgentCoreModelTurn = {
   response: AgentCoreModelResponse;
@@ -76,6 +78,7 @@ function maybePreExecuteStreamingToolCall(args: {
       messages: args.messages,
       call: args.call,
     }) !== undefined ||
+    !isAgentCoreStreamingToolCallReadyForPreExecution(args.call) ||
     !isAgentCoreToolCallConcurrencySafe(args.queryArgs.tools ?? [], args.call) ||
     args.preExecutedToolCalls.has(args.call.id)
   ) {
@@ -111,13 +114,16 @@ async function readCompleteModelTurn(
   for (let attempt = 1; attempt <= MAX_MODEL_TURN_ATTEMPTS; attempt += 1) {
     try {
       return {
-        response: normalizeModelResponseToolCallIds(
+        response: normalizeModelResponseToolCalls(
           await complete({
             systemPrompt: args.systemPrompt,
+            systemPromptBlocks: args.systemPromptBlocks,
             messages: messagesForModelRequest(args, messages),
             tools: args.tools ?? [],
             signal: args.signal,
           }),
+          args.tools ?? [],
+          messages,
         ),
         preExecutedToolCalls,
       };
@@ -138,15 +144,26 @@ async function readCompleteModelTurn(
   throw new Error("Agent Core model retry loop exhausted unexpectedly.");
 }
 
-function normalizeModelResponseToolCallIds(
+function normalizeModelResponseToolCalls(
   response: AgentCoreModelResponse,
+  tools: NonNullable<AgentCoreQueryLoopArgs["tools"]>,
+  messages: readonly AgentCoreMessage[],
 ): AgentCoreModelResponse {
+  const toolCallIdState = createAgentCoreToolCallIdStateFromMessages(messages);
   return {
     ...response,
     toolCalls:
       response.toolCalls === undefined
         ? undefined
-        : ensureAgentCoreToolCallsUniqueIds(response.toolCalls),
+        : response.toolCalls.map((call) =>
+            ensureAgentCoreToolCallUniqueId(
+              repairAgentCoreToolCallNameAlias({
+                call,
+                tools,
+              }),
+              toolCallIdState,
+            ),
+          ),
   };
 }
 
@@ -170,13 +187,15 @@ export async function* readAgentCoreModelTurn(
   for (let attempt = 1; attempt <= MAX_MODEL_TURN_ATTEMPTS; attempt += 1) {
     let content = "";
     const toolCalls: AgentCoreToolCall[] = [];
+    let usage: AgentCoreModelUsage | undefined;
     const seenToolCallSignatures = new Set<string>();
     let observedModelOutput = false;
     let canPreExecuteStreamingTools = true;
-    const toolCallIdState = createAgentCoreToolCallIdState();
+    const toolCallIdState = createAgentCoreToolCallIdStateFromMessages(messages);
     try {
       for await (const event of args.model.stream({
         systemPrompt: args.systemPrompt,
+        systemPromptBlocks: args.systemPromptBlocks,
         messages: messagesForModelRequest(args, messages),
         tools: args.tools ?? [],
         signal: args.signal,
@@ -193,13 +212,21 @@ export async function* readAgentCoreModelTurn(
 
         if (event.type === "tool-call") {
           observedModelOutput = true;
-          const call = ensureAgentCoreToolCallUniqueId(event.call, toolCallIdState);
+          const call = ensureAgentCoreToolCallUniqueId(
+            repairAgentCoreToolCallNameAlias({
+              call: event.call,
+              tools: args.tools ?? [],
+            }),
+            toolCallIdState,
+          );
           const signature = createAgentCoreToolCallSignature(call);
           const isDuplicateInTurn = seenToolCallSignatures.has(signature);
           seenToolCallSignatures.add(signature);
           toolCalls.push(call);
-          const isConcurrencySafe = isAgentCoreToolCallConcurrencySafe(args.tools ?? [], call);
-          if (!isConcurrencySafe) {
+          const isReadyForPreExecution = isAgentCoreStreamingToolCallReadyForPreExecution(call);
+          const isConcurrencySafe =
+            isReadyForPreExecution && isAgentCoreToolCallConcurrencySafe(args.tools ?? [], call);
+          if (!isReadyForPreExecution || !isConcurrencySafe) {
             canPreExecuteStreamingTools = false;
           }
           if (
@@ -221,6 +248,7 @@ export async function* readAgentCoreModelTurn(
         }
 
         if (event.type === "message-end") {
+          usage = event.usage;
           break;
         }
       }
@@ -229,6 +257,7 @@ export async function* readAgentCoreModelTurn(
         response: {
           content,
           toolCalls,
+          ...(usage === undefined ? {} : { usage }),
         },
         preExecutedToolCalls,
       };
@@ -244,6 +273,7 @@ export async function* readAgentCoreModelTurn(
           response: {
             content,
             toolCalls,
+            ...(usage === undefined ? {} : { usage }),
           },
           preExecutedToolCalls,
           // 流已经产生可见输出时不能重试，否则 GUI 和 transcript 会出现重复前缀。

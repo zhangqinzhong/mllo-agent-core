@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { getMlloStateDbPath } from "../agent-core/runtime-home/mllo-home-paths";
+import { assertMlloStateSchemaVersionSupported } from "../agent-core/runtime-state/mllo-state-schema";
 import {
   toMlloThreadRecord,
   type MlloThreadRecord,
@@ -43,6 +44,7 @@ export async function readMlloObserverStateThreads(
     timeout: 1000,
   });
   try {
+    assertMlloStateSchemaVersionSupported(db);
     if (!hasSqliteTable(db, "threads")) {
       return [];
     }

@@ -26,6 +26,19 @@ type MutableParsedArgs = {
   resumeSessionId?: string;
   observerHost?: string;
   observerPort?: number;
+  anthropicTraceProxy: boolean;
+  anthropicTraceSource?: string;
+  traceProxyHost?: string;
+  traceProxyPort?: number;
+  anthropicTraceUpstream?: string;
+  openaiTraceProxy: boolean;
+  openaiTraceSource?: string;
+  openaiTraceProxyHost?: string;
+  openaiTraceProxyPort?: number;
+  openaiTraceUpstream?: string;
+  traceCaptureBodies: boolean;
+  langfuseExportExternalTraces: boolean;
+  langfuseExportIntervalMs?: number;
   continueLatest: boolean;
   force: boolean;
   print: boolean;
@@ -199,6 +212,63 @@ function applyOption(args: readonly string[], index: number, parsed: MutablePars
       parsed.observerPort = parsePositiveInt(next.value, flag);
       return next.nextIndex;
     }
+    case "--anthropic-trace-proxy":
+      parsed.anthropicTraceProxy = true;
+      return index;
+    case "--anthropic-trace-source": {
+      const next = nextValue();
+      parsed.anthropicTraceSource = next.value;
+      return next.nextIndex;
+    }
+    case "--trace-proxy-host": {
+      const next = nextValue();
+      parsed.traceProxyHost = next.value;
+      return next.nextIndex;
+    }
+    case "--trace-proxy-port": {
+      const next = nextValue();
+      parsed.traceProxyPort = parsePositiveInt(next.value, flag);
+      return next.nextIndex;
+    }
+    case "--anthropic-upstream": {
+      const next = nextValue();
+      parsed.anthropicTraceUpstream = next.value;
+      return next.nextIndex;
+    }
+    case "--openai-trace-proxy":
+      parsed.openaiTraceProxy = true;
+      return index;
+    case "--openai-trace-source": {
+      const next = nextValue();
+      parsed.openaiTraceSource = next.value;
+      return next.nextIndex;
+    }
+    case "--openai-trace-proxy-host": {
+      const next = nextValue();
+      parsed.openaiTraceProxyHost = next.value;
+      return next.nextIndex;
+    }
+    case "--openai-trace-proxy-port": {
+      const next = nextValue();
+      parsed.openaiTraceProxyPort = parsePositiveInt(next.value, flag);
+      return next.nextIndex;
+    }
+    case "--openai-upstream": {
+      const next = nextValue();
+      parsed.openaiTraceUpstream = next.value;
+      return next.nextIndex;
+    }
+    case "--trace-capture-bodies":
+      parsed.traceCaptureBodies = true;
+      return index;
+    case "--langfuse-export-external-traces":
+      parsed.langfuseExportExternalTraces = true;
+      return index;
+    case "--langfuse-export-interval-ms": {
+      const next = nextValue();
+      parsed.langfuseExportIntervalMs = parsePositiveInt(next.value, flag);
+      return next.nextIndex;
+    }
     case "--session-id": {
       const next = nextValue();
       parsed.sessionId = next.value;
@@ -223,6 +293,10 @@ export function parseMlloCliArgs(
     cwd: process.cwd(),
     outputFormat: "text",
     inputFormat: "text",
+    anthropicTraceProxy: false,
+    openaiTraceProxy: false,
+    traceCaptureBodies: false,
+    langfuseExportExternalTraces: false,
     continueLatest: false,
     force: false,
     print: false,
@@ -267,6 +341,33 @@ export function parseMlloCliArgs(
     ...(parsed.resumeSessionId === undefined ? {} : { resumeSessionId: parsed.resumeSessionId }),
     ...(parsed.observerHost === undefined ? {} : { observerHost: parsed.observerHost }),
     ...(parsed.observerPort === undefined ? {} : { observerPort: parsed.observerPort }),
+    anthropicTraceProxy: parsed.anthropicTraceProxy,
+    ...(parsed.anthropicTraceSource === undefined
+      ? {}
+      : { anthropicTraceSource: parsed.anthropicTraceSource }),
+    ...(parsed.traceProxyHost === undefined ? {} : { traceProxyHost: parsed.traceProxyHost }),
+    ...(parsed.traceProxyPort === undefined ? {} : { traceProxyPort: parsed.traceProxyPort }),
+    ...(parsed.anthropicTraceUpstream === undefined
+      ? {}
+      : { anthropicTraceUpstream: parsed.anthropicTraceUpstream }),
+    openaiTraceProxy: parsed.openaiTraceProxy,
+    ...(parsed.openaiTraceSource === undefined
+      ? {}
+      : { openaiTraceSource: parsed.openaiTraceSource }),
+    ...(parsed.openaiTraceProxyHost === undefined
+      ? {}
+      : { openaiTraceProxyHost: parsed.openaiTraceProxyHost }),
+    ...(parsed.openaiTraceProxyPort === undefined
+      ? {}
+      : { openaiTraceProxyPort: parsed.openaiTraceProxyPort }),
+    ...(parsed.openaiTraceUpstream === undefined
+      ? {}
+      : { openaiTraceUpstream: parsed.openaiTraceUpstream }),
+    traceCaptureBodies: parsed.traceCaptureBodies,
+    langfuseExportExternalTraces: parsed.langfuseExportExternalTraces,
+    ...(parsed.langfuseExportIntervalMs === undefined
+      ? {}
+      : { langfuseExportIntervalMs: parsed.langfuseExportIntervalMs }),
     continueLatest: parsed.continueLatest,
     force: parsed.force,
   };

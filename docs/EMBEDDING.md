@@ -9,6 +9,21 @@
 4. 事件渲染
 ```
 
+## 版本握手
+
+宿主启动 Agent runtime 前先读取公开能力快照，不要从 npm package version 猜测协议：
+
+```ts
+import { getAgentCoreRuntimeCapabilities } from '@mllo/agent-core'
+
+const capabilities = getAgentCoreRuntimeCapabilities()
+if (capabilities.runtimeContractVersion !== 1) {
+  throw new Error(`Unsupported Agent Core runtime contract: ${capabilities.runtimeContractVersion}`)
+}
+```
+
+快照还包含 `queryEventSchemaVersion`、`interactionSchemaVersion` 和 `stateSchemaVersion`。如果已有 `state.sqlite` 来自更新的 Core，打开时会抛出 `MlloStateSchemaVersionError`，旧 Core 不会尝试修改该数据库。
+
 ## 1. 模型配置
 
 ```ts
@@ -45,14 +60,54 @@ session: {
 权限请求从 controller 抛给宿主应用：
 
 ```ts
-onPermissionRequest: async (request) => {
+onPermissionRequest: async (request, { interactionId }) => {
+  showPendingPermission(interactionId, request)
   return {
     status: 'allow'
   }
 }
 ```
 
-真实产品里应该把 `request.reason`、`request.toolName`、`request.input` 展示给用户，并允许保存规则。
+真实产品里应该把 `request.decision.reason`、`request.call.name`、`request.call.input` 展示给用户，并允许保存规则。
+
+### 3.1 进程重启后的 pending interaction
+
+不提供 callback 时，controller 返回 `waiting-for-permission` 或
+`waiting-for-elicitation`，对应 request 已经同时写入 JSONL 和 SQLite。宿主重启后可以重新打开
+state store，列出并提交 resolution：
+
+```ts
+import {
+  AgentCoreJsonlSessionStore,
+  MlloStateStore,
+  listPendingAgentCoreInteractions,
+  submitAgentCoreInteractionResolution,
+} from '@mllo/agent-core'
+
+const stateStore = new MlloStateStore({ dbPath: `${home}/.mllo/state.sqlite` })
+const sessionStore = new AgentCoreJsonlSessionStore({ configDir: `${home}/.mllo` })
+
+const pending = listPendingAgentCoreInteractions({ stateStore })
+const interaction = pending[0]
+if (interaction?.kind === 'elicitation') {
+  const outcome = await submitAgentCoreInteractionResolution({
+    stateStore,
+    sessionStore,
+    interactionId: interaction.id,
+    resolution: {
+      kind: 'elicitation',
+      decision: { status: 'answer', answer: 'A' }
+    }
+  })
+  console.log(outcome.status)
+}
+```
+
+返回状态为 `resolved`、`already-resolved`、`conflict`、`invalid-resolution` 或
+`not-found`。resolution 是持久化的用户决定，不是 exactly-once 执行凭证；特别是 permission
+`allow`，进程重启后不会自动重放工具。宿主完成恢复流程后应关闭 `stateStore`。
+如果 SQLite 投影缺失或落后，可调用 `reindexMlloState({ configDir, stateDbPath, reset: true })`
+从 session JSONL 重建 pending/resolved 当前态。
 
 ## 4. 事件渲染
 
@@ -113,3 +168,22 @@ MLLO_DUMP_PROMPTS=1
 ```
 
 这个文件适合排查模型协议、工具 schema、上下文膨胀和流式响应问题。
+
+## 8. 宿主领域工具
+
+桌面端、内容系统或服务端可以把自己的领域能力注入同一个 Query Loop：
+
+```ts
+runAgentCoreController({
+  // 保留文件、Shell、Skills 等默认工具。
+  includeBaseTools: true,
+  additionalTools: [contentSearchTool, contentOrganizeTool],
+  additionalSystemPromptBlocks: [contentProductPolicy],
+  toolExposureMode: 'direct',
+  // 省略其他运行参数。
+})
+```
+
+纯领域 Agent 可以设置 `includeBaseTools: false`，只暴露宿主传入的工具。Core 会拒绝同名工具，避免宿主静默覆盖默认工具的权限或实现。
+
+宿主产品策略使用 `additionalSystemPromptBlocks` 注入。每个 block 都要使用唯一名称并声明 cache scope；Core 会把它和基础策略一起写入 session snapshot，恢复会话时不从当前宿主环境重新猜测。

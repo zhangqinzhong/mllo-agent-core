@@ -27,6 +27,38 @@ host application
 
 宿主应用可以决定界面、窗口、IPC、配置入口和权限弹窗，但不能重新定义 agent core 的事实格式。
 
+## Compatibility Handshake
+
+宿主不能用 npm 包版本推断运行协议。Core 从根入口导出协议版本和一个无 I/O 的能力快照：
+
+```ts
+import {
+  AGENT_CORE_QUERY_EVENT_SCHEMA_VERSION,
+  AGENT_CORE_INTERACTION_SCHEMA_VERSION,
+  AGENT_CORE_RUNTIME_CONTRACT_VERSION,
+  MLLO_STATE_SCHEMA_VERSION,
+  getAgentCoreRuntimeCapabilities,
+} from '@mllo/agent-core'
+
+const capabilities = getAgentCoreRuntimeCapabilities()
+```
+
+当前公开版本为：
+
+| 边界 | 版本 | 含义 |
+| --- | ---: | --- |
+| Runtime contract | `1` | controller、权限、会话和宿主交互的整体语义 |
+| Query event schema | `1` | `AgentCoreQueryEvent` timeline 协议 |
+| Interaction schema | `1` | permission / elicitation request 与 resolution 协议 |
+| State schema | `9` | 当前 Core 能打开和写入的最高 SQLite `user_version` |
+
+版本规则：
+
+- 向后兼容地增加可忽略事件或可选字段，不提升 query event schema；删除、改名或改变已有字段语义时必须提升。
+- 任一稳定边界发生不兼容语义变化时，必须提升 runtime contract，并提供宿主迁移说明。
+- `state.sqlite` 表结构变化必须提升 state schema，并保留从旧版本向前迁移的测试 fixture。
+- 能力快照必须在打开 session 或 `state.sqlite` 之前可读取，宿主应按自己支持的版本范围做启动门禁。
+
 ## Stable Contracts
 
 以下内容变更时必须视为协议变更，并配套迁移或兼容层。
@@ -40,6 +72,7 @@ host application
 - 保持已有事件字段向后兼容。
 - 为新事件补测试。
 - 明确宿主应用在未知事件下可以安全忽略。
+- 每次 query loop 结束必须产生 `terminal` event；`terminal.reason` 是比 `status` 更细的结束原因，测试和 observer 应优先用它判断恢复、失败和等待路径。
 
 ### 2. Session Transcript
 
@@ -51,6 +84,20 @@ JSONL transcript 是会话事实来源。
 - entry 必须带 `kind`、`uuid`、`timestamp`、`sessionId`、`cwd`。
 - 新增 `kind` 时必须保证旧 reader 能跳过或保留未知 entry。
 - `state.sqlite` 和 side index 都是派生索引，不能替代 transcript。
+- 继续最近会话必须优先使用 `state.sqlite` 的 thread 当前态，缺失或损坏时再退回 `session_index.jsonl`，不能要求宿主应用全量扫描 transcript。
+- 每次追加新的 query loop message 后，必须追加带 `messageCount` 的 `budget-event` 检查点；resume 必须暴露最新检查点和实际恢复 message 数的差异，方便发现裁剪、compact 或中断导致的上下文漂移。
+
+### 2.1 Input History
+
+`history.jsonl` 是交互输入历史，不是会话事实来源。
+
+稳定要求：
+
+- 追加写入必须带 `sessionId`、`cwd` 和原始 `input`。
+- CLI/GUI 用于展示历史时必须反向读取、按 `cwd` 过滤，并支持当前 session 优先。
+- 交互历史 listing 必须跳过坏行；严格审计 reader 可以继续报错。
+- 语义撤销必须追加 `input-retraction` tombstone。比如中断恢复或用户 undo 让某次提交不再代表真实意图时，交互 listing 必须隐藏被撤销输入，审计 reader 必须保留原始记录和撤销记录。
+- 大历史文件不能要求宿主应用整文件读入内存。
 
 ### 3. Runtime State
 
@@ -59,6 +106,7 @@ JSONL transcript 是会话事实来源。
 稳定要求：
 
 - 表结构变更必须走 schema version。
+- 数据库 `user_version` 高于 `MLLO_STATE_SCHEMA_VERSION` 时必须在建表、迁移或修改 journal 设置前抛出 `MlloStateSchemaVersionError`；宿主应升级 Core，不能用旧 Core 写入未来格式。
 - GUI 只能把它当索引；损坏时应能从 JSONL reindex。
 - thread、task、team、worker tool event 的语义要和 transcript entry 对齐。
 
@@ -73,6 +121,33 @@ JSONL transcript 是会话事实来源。
 - 不混进主 transcript。
 - observer 展示前必须脱敏常见 secret 字段。
 
+### 4.1 External Traces
+
+`external-traces/<source>.jsonl` 是 observer 捕获外部 agent 或外部宿主进程流量的事实记录。
+
+稳定要求：
+
+- 默认不开启本地代理；宿主或 CLI 必须显式打开。
+- trace proxy 必须透传请求，不能参与 agent 决策。
+- trace proxy 至少应覆盖 Anthropic `/v1/messages`、OpenAI-compatible `/v1/chat/completions` 和 OpenAI Responses `/v1/responses`。
+- 默认只保存请求/响应摘要；保存 body 必须由用户显式开启。
+- 写入前和展示前都必须脱敏常见 secret 字段。
+- external trace 不能混进 session transcript，也不能进入模型上下文。
+
+### 4.2 Project Instructions
+
+`AGENTS.md` 是项目指令文件，由 core 负责发现并注入 prompt context。`AGENTS.override.md` 是同目录本地覆盖文件，优先级高于 `AGENTS.md`。
+
+稳定要求：
+
+- 对当前 `cwd`，必须从所属 workspace root 到当前目录逐层读取 `AGENTS.md`，越靠近 `cwd` 的规则越后出现。
+- 同一目录存在 `AGENTS.override.md` 时，只加载覆盖文件，不再加载同目录的 `AGENTS.md`。
+- 项目指令加载必须有总字节预算；超过预算时必须截断并暴露 `includedBytes`、`originalBytes` 和 `truncated` 状态。
+- 发现过程不能越过 workspace root，避免父目录规则泄漏到无关项目。
+- 额外 workspace root 不在当前 `cwd` 祖先链上时，只读取该 root 自身的 `AGENTS.md`。
+- 写类文件工具在修改目标路径前，必须检查目标文件额外适用但尚未出现在当前 prompt context 里的 `AGENTS.md`；发现后本次不能写文件，必须把规则回灌给模型并要求重试。
+- 宿主应用不能绕过 core 自行拼接项目规则；否则 CLI、桌面端和服务端会看到不同上下文。
+
 ### 5. Permissions
 
 权限决策由 core 产生，用户交互由宿主应用完成。
@@ -80,9 +155,26 @@ JSONL transcript 是会话事实来源。
 稳定要求：
 
 - `allow`、`ask`、`deny` 的语义不能漂移。
+- permission resume 继续执行同一 assistant turn 时，如果后续工具再次触发权限请求，必须再次返回 `waiting-for-permission`，不能把它伪造成普通 `tool_result`。
 - workspace roots 是文件工具的硬边界。
 - shell 风险解释必须能被 UI 原样展示。
 - 保存规则只能保存明确可解释的规则，不能保存含混输入。
+
+### 5.1 Durable Interactions
+
+permission 和 elicitation 使用统一 interaction 生命周期。Core 在调用宿主 callback 前追加
+`interaction-request-event`，再把 pending 当前态投影到 SQLite `interactions` 表；带
+`interactionId` 的 `permission-event` / `elicitation-event` 是 resolution 事实。
+
+稳定要求：
+
+- JSONL 始终是事实源，SQLite 只用于 `getInteraction()`、`listPendingInteractions()` 等快速查询。
+- `listPendingAgentCoreInteractions()` 可在进程重启后重新列出尚未决议的请求。
+- `submitAgentCoreInteractionResolution()` 对相同 resolution 返回 `already-resolved`；不同二次决议返回 `conflict`；kind 不匹配返回 `invalid-resolution`；未知 id 返回 `not-found`。
+- callback 仍可只接收原来的第一个参数；Core 会把 `{ interactionId }` 作为第二参数传入，供支持 durable UI 的宿主关联请求。
+- interaction resolution 只表示决定已收到，不表示工具已经执行。重启后不得仅凭已持久化的 `allow` 自动重放有副作用的工具；工具实现、受保护输入或执行状态缺失时，应由宿主重新发起运行。
+- permission request 中的 secret-like shell 环境变量在进入 JSONL/SQLite 前必须脱敏。
+- JSONL 与 SQLite 之间没有跨文件事务；同一 session 必须由单一宿主 writer 提交 resolution，崩溃后通过 reindex 修复 SQLite 投影。
 
 ### 6. Workers
 
@@ -95,7 +187,36 @@ JSONL transcript 是会话事实来源。
 - worker permission request 必须走宿主应用统一审批。
 - worker adapter 不能把第三方产品语义泄漏成 core 的主协议。
 
-### 7. Runtime Home
+### 7. Tool Calls
+
+工具调用由 core 负责解析、去重、校验、执行和回灌结果。
+
+稳定要求：
+
+- tool call id 只用于配对结果；重复检测必须按工具名和 JSON 参数判断。
+- 同一轮复用 tool call id 时必须改写成唯一 id，并保留原始 id 的 repair metadata，不能静默复用。
+- tool result 必须能和 assistant tool call 配对；compact、resume 和 rewind 类逻辑不能切断配对。
+- schema validation 和 malformed arguments 必须回灌给模型修复，不能静默执行。
+- schema validation feedback 必须包含校验问题、收到的参数预览和期望 schema 预览，帮助模型下一轮直接修正。
+- 仅允许白名单参数别名自动修复；修复必须写入 metadata，不能覆盖已经存在的 canonical 参数。
+- 未知工具名必须以 tool_result 形式回灌修复建议；可以建议别名或相似工具，但不能自动执行未注册名称。
+- 工具定义的 `maxResultSizeChars` 是持久化阈值，不是 runner 级硬截断；超过阈值时必须先保留完整输出，再生成模型可见 preview 和 blob 引用。
+- 同一 assistant turn 的所有 `tool_result` 必须共享总输出预算，避免多个工具结果各自不过限但合计打爆下一轮上下文。
+- 当 runtime 提供 blob store 时，被共享预算裁剪的 `tool_result` 必须保留 `outputBlobPath` 和 `outputBlobBytes`，并在模型可见正文中渲染 `<mllo_persisted_tool_output>` 块；完整输出不能静默丢失。
+- 每轮工具批次完成后可以产生 `tool-batch-summary` timeline event；默认应调用 summary model 生成短 label，失败时降级到确定性 label；event 只能保存 label、tool id/name、状态、错误类别和截断/blob 元数据，不能复制原始 tool input 或 output。
+- 每次 query loop 决定再次进入模型调用时必须产生 `continue` timeline event，并用 `continuation.reason` 区分 `next_turn`、`stop_hook_blocking`、`reactive_compact_retry`、permission/elicitation resume 等路径；宿主 UI 可以忽略该事件，但 JSONL/observer 必须保留它。
+- 工具暴露必须支持 `direct` 和 `deferred` 两种模式；`deferred` 模式下长尾工具不能直接塞进模型 tool schema，必须通过 `search_deferred_tools` 和 `call_deferred_tool` 两步访问，降低工具 schema token 和注意力成本。
+- 同一 autonomous loop 内已失败的同名同参工具调用再次出现时必须生成 repeated-failure，而不是再次执行。
+- 权限拒绝必须写成带错误分类的 tool_result；即使 run 进入 denied 终态，也不能留下未闭合的 tool call。
+- query loop 入口和 session resume 都必须修复缺失或错位的 tool_result，不能把悬空 tool_call 发送给模型端点。
+- indexed session resume 必须恢复连续 tail；按预算裁剪时不能跳过中间消息后再恢复更早消息。
+- fallback JSONL session resume 也必须暴露被省略的 entry 数量；没有 side index 的旧会话不能让模型误以为 head/tail 窗口就是完整历史。
+- compact 保留最近 tail 时不能切断 assistant tool_call、对应 tool_result 和紧随其后的 assistant 回复轨迹。
+- indexed session resume 也不能切断 assistant tool_call、对应 tool_result 和紧随其后的 assistant 回复轨迹。
+- 流式预执行只允许用于工具名已确定、参数 JSON 可信、且工具声明并发安全的调用。
+- 截断 JSON 的修复可以保留为执行候选，但不能在模型 turn 完全结束前预执行。
+
+### 8. Runtime Home
 
 core 不猜宿主应用的数据目录。宿主应用必须显式传入 runtime home 或 session config。
 
@@ -110,7 +231,7 @@ core 不猜宿主应用的数据目录。宿主应用必须显式传入 runtime 
 允许自由修改：
 
 - 内部实现细节。
-- observer 页面样式。
+- observer API 内部展示方式。
 - token 估算策略。
 - provider adapter 的内部 wire 解析。
 - 测试 fixture。

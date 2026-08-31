@@ -2,6 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
+import { createAgentCoreMcpClientIdentity } from "./agent-core-mcp-client-identity";
 import type { AgentCoreToolAvailabilityPolicy } from "../tools/agent-core-tool-types";
 import type {
   AgentCoreMcpClient,
@@ -157,11 +158,8 @@ export class AgentCoreStdioMcpClient implements AgentCoreMcpClient {
 
   // 真正创建 SDK client/transport，并把 stderr 尾部保留下来方便连接失败诊断。
   private async createConnection(): Promise<Client> {
-    const client = new Client({
-      // mllo 使用自己的 client identity，避免 core 继续继承宿主应用品牌边界。
-      name: "mllo-agent-core",
-      version: "0.1.0",
-    });
+    // mllo 使用自己的 client identity，避免 core 继续继承宿主应用品牌边界。
+    const client = new Client(createAgentCoreMcpClientIdentity());
     const transport = new StdioClientTransport({
       command: this.command,
       args: this.args,

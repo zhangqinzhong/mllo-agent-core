@@ -20,6 +20,7 @@ const MlloModelProviderSchema = z.object({
   apiKeyEnv: z.string().min(1).optional(),
   model: z.string().min(1),
   maxTokens: z.number().int().positive().optional(),
+  contextWindowTokens: z.number().int().positive().optional(),
   temperature: z.number().optional(),
   anthropicVersion: z.string().optional(),
   promptProfile: z.enum(AGENT_CORE_PROMPT_PROFILES).optional(),
@@ -315,6 +316,9 @@ function resolveMlloModelProvider(
   };
   if (provider.maxTokens !== undefined) {
     resolved.maxTokens = provider.maxTokens;
+  }
+  if (provider.contextWindowTokens !== undefined) {
+    resolved.contextWindowTokens = provider.contextWindowTokens;
   }
   if (provider.temperature !== undefined) {
     resolved.temperature = provider.temperature;

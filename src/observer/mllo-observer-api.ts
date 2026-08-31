@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { listMlloExternalTraceLogs, readMlloExternalTraceLog } from "./mllo-external-trace-jsonl";
 import { listMlloObserverSessions, readMlloObserverSessionDetail } from "./mllo-observer-sessions";
 import type { MlloObserverOptions } from "./mllo-observer-types";
 
@@ -30,6 +31,10 @@ function readBoolean(value: string | null): boolean {
   return value === "1" || value === "true";
 }
 
+function readOptionalBoolean(value: string | null): boolean | undefined {
+  return value === null ? undefined : readBoolean(value);
+}
+
 function methodAllowed(request: IncomingMessage, response: ServerResponse): boolean {
   if (request.method === "GET" || request.method === "HEAD") {
     return true;
@@ -53,6 +58,36 @@ async function sendSessions(
   sendJson(response, 200, {
     sessions,
   });
+}
+
+async function sendExternalTraceLogs(
+  response: ServerResponse,
+  context: ApiRouteContext,
+): Promise<void> {
+  const traces = await listMlloExternalTraceLogs({
+    homePath: context.options.homePath,
+  });
+  sendJson(response, 200, {
+    traces,
+  });
+}
+
+async function sendExternalTraceLog(
+  requestUrl: URL,
+  response: ServerResponse,
+  context: ApiRouteContext,
+  source: string,
+): Promise<void> {
+  const trace = await readMlloExternalTraceLog({
+    homePath: context.options.homePath,
+    source,
+    maxEntries: readPositiveInt(requestUrl.searchParams.get("limit"), 20),
+    maxBytes: readPositiveInt(requestUrl.searchParams.get("maxBytes"), 2 * 1024 * 1024),
+    maxJsonChars: readPositiveInt(requestUrl.searchParams.get("maxJsonChars"), 500_000),
+    includeParsed: readOptionalBoolean(requestUrl.searchParams.get("includeParsed")) ?? false,
+    redactSecrets: context.options.redactSecrets,
+  });
+  sendJson(response, 200, trace);
 }
 
 async function sendSessionDetail(
@@ -141,12 +176,20 @@ export async function handleMlloObserverApiRequest(
     if (parts.length === 1 && parts[0] === "api") {
       sendJson(response, 200, {
         name: "mllo observer",
-        endpoints: ["/api/sessions", "/api/sessions/:id"],
+        endpoints: ["/api/sessions", "/api/sessions/:id", "/api/external-traces"],
       });
       return true;
     }
     if (parts.length === 2 && parts[1] === "sessions") {
       await sendSessions(requestUrl, response, context);
+      return true;
+    }
+    if (parts.length === 2 && parts[1] === "external-traces") {
+      await sendExternalTraceLogs(response, context);
+      return true;
+    }
+    if (parts.length === 3 && parts[1] === "external-traces") {
+      await sendExternalTraceLog(requestUrl, response, context, decodeURIComponent(parts[2]!));
       return true;
     }
     if (parts.length >= 3 && parts[1] === "sessions") {

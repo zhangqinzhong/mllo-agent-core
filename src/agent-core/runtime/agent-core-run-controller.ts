@@ -3,10 +3,16 @@ import { recordAgentCoreSystemContextSnapshot } from "../context/agent-core-syst
 import type {
   AgentCoreMessage,
   AgentCoreQueryEvent,
+  AgentCoreQueryLoopArgs,
   AgentCoreQueryLoopResult,
 } from "../query-loop/agent-core-query-types";
+import {
+  createAgentCoreContinuationEvent,
+  type AgentCoreContinuation,
+} from "../query-loop/agent-core-continuation";
 import { runAgentCoreQueryLoop } from "../query-loop/agent-core-query-loop";
 import { appendAgentCoreInputHistoryEntry } from "../session/agent-core-input-history";
+import { writeAgentCoreToolResultBlob } from "../tools/agent-core-tool-result-blob-store";
 import { applyAgentCoreRunBudgetWithHookRecording } from "./agent-core-run-budget-hook-recording";
 import { resumeAgentCoreRunElicitation } from "./agent-core-run-elicitation";
 import { resumeAgentCoreRunPermission } from "./agent-core-run-permission";
@@ -15,7 +21,8 @@ import { createAgentCoreWorkerPermissionRequester } from "./agent-core-worker-pe
 import {
   createAgentCoreReactiveCompactFailureMessage,
   createAgentCoreReactiveCompactBudget,
-  renderAgentCoreRunSystemPrompt,
+  renderAgentCoreRunSystemPromptBlocks,
+  renderAgentCoreRunTurnContext,
   shouldRunAgentCoreReactiveCompact,
   shouldStopAfterAgentCoreReactiveCompact,
 } from "./agent-core-reactive-compact";
@@ -48,6 +55,14 @@ import {
   persistedAgentCoreRunResumeMessageCount,
 } from "./agent-core-run-context-metadata";
 import { buildAgentCoreRunContext } from "./agent-core-run-build-context";
+import { appendAgentCoreHostPromptBlocks } from "../context/agent-core-host-prompt-blocks";
+import { joinAgentCorePromptBlocks } from "../query-loop/agent-core-prompt-block-types";
+import {
+  createAgentCoreLangfuseRunTrace,
+  finishAgentCoreLangfuseRunTrace,
+  type AgentCoreLangfuseRunTrace,
+} from "../observability/agent-core-langfuse-run-trace";
+import { recordAgentCorePendingInteraction } from "./agent-core-interactions";
 // 运行一次 Agent Core 对话。它串起 provider、context、tools、session 和 query loop。
 export async function* runAgentCoreController(
   options: AgentCoreRunControllerOptions,
@@ -63,6 +78,9 @@ export async function* runAgentCoreController(
     clients: [],
     ownedClients: [],
   };
+  let langfuseTrace: AgentCoreLangfuseRunTrace | undefined;
+  let finalResult: AgentCoreRunControllerResult | undefined;
+  let finalError: unknown;
   try {
     await appendAgentCoreInputHistoryEntry({
       configDir: options.session.configDir,
@@ -72,6 +90,14 @@ export async function* runAgentCoreController(
     });
     const loadedConfig = await loadAgentCoreRunConfig(options);
     const provider = loadAgentCoreRunModelProvider(options, loadedConfig);
+    langfuseTrace = await createAgentCoreLangfuseRunTrace({
+      options: options.observability?.langfuse,
+      sessionId: session.handle.sessionId,
+      cwd,
+      workspaceRoots,
+      input: options.input,
+      provider,
+    });
     const runtimeHome = {
       homePath: options.session.configDir,
     };
@@ -92,6 +118,7 @@ export async function* runAgentCoreController(
       provider,
       session,
       fetchImpl: options.fetchImpl,
+      langfuseTrace,
     });
     mcpClientResolution = await resolveAgentCoreRunMcpClients({
       cwd,
@@ -114,6 +141,7 @@ export async function* runAgentCoreController(
     const budgetRun = await applyAgentCoreRunBudgetWithHookRecording({
       messages: context.queryArgs.messages,
       model,
+      provider,
       session,
       budget: options.budget,
       hooks,
@@ -153,8 +181,42 @@ export async function* runAgentCoreController(
     };
     await syncThreadState();
     let systemPrompt = context.systemPrompt;
+    let systemPromptBlocks = context.systemPromptBlocks;
+    let turnContext = context.queryArgs.turnContext;
+    let previousContinuation: AgentCoreContinuation | undefined;
+    const rememberContinuationEvent = (event: AgentCoreQueryEvent): void => {
+      if (event.type === "continue") {
+        previousContinuation = event.continuation;
+      }
+    };
+    const recordContinuation = async (args: {
+      continuation: AgentCoreContinuation;
+      messageCount: number;
+    }): Promise<AgentCoreQueryEvent> => {
+      const event = createAgentCoreContinuationEvent({
+        continuation: args.continuation,
+        previousContinuation,
+        messageCount: args.messageCount,
+      });
+      previousContinuation = args.continuation;
+      return await recordAgentCoreRunEvent({
+        session,
+        event,
+        workers: options.workers ?? [],
+      });
+    };
     if (budgeted.compacted) {
-      systemPrompt = renderAgentCoreRunSystemPrompt({
+      systemPromptBlocks = appendAgentCoreHostPromptBlocks(
+        renderAgentCoreRunSystemPromptBlocks({
+          promptContext: context.promptContext,
+          promptProfile: context.promptProfile,
+          budgetState,
+          budgetOptions: options.budget,
+        }),
+        options.additionalSystemPromptBlocks,
+      );
+      systemPrompt = joinAgentCorePromptBlocks(systemPromptBlocks);
+      turnContext = renderAgentCoreRunTurnContext({
         promptContext: context.promptContext,
         promptProfile: context.promptProfile,
         budgetState,
@@ -163,6 +225,7 @@ export async function* runAgentCoreController(
       await recordAgentCoreSystemContextSnapshot({
         session,
         prompt: systemPrompt,
+        promptBlocks: systemPromptBlocks,
         promptContext: context.promptContext,
         reason: "compact",
       });
@@ -171,14 +234,36 @@ export async function* runAgentCoreController(
       session,
       onRequest: options.onWorkerPermissionRequest,
     });
+    const storeToolResultBlob: AgentCoreQueryLoopArgs["storeToolResultBlob"] = async ({
+      call,
+      content,
+      originalChars,
+    }) => {
+      const blob = await writeAgentCoreToolResultBlob({
+        projectDir: session.handle.projectDir,
+        sessionId: session.handle.sessionId,
+        cwd: session.handle.cwd,
+        toolCallId: call.id,
+        toolName: call.name,
+        content,
+        originalChars,
+      });
+      return {
+        outputBlobPath: blob.relativePath,
+        outputBlobBytes: blob.byteLength,
+      };
+    };
     let reactiveCompactRetried = false;
     while (true) {
       const generator = runAgentCoreQueryLoop({
         ...context.queryArgs,
         systemPrompt,
+        systemPromptBlocks,
+        turnContext,
         messages,
         hooks,
         requestWorkerPermission,
+        storeToolResultBlob,
       });
       let result: AgentCoreQueryLoopResult;
       while (true) {
@@ -192,6 +277,7 @@ export async function* runAgentCoreController(
           event: item.value,
           workers: options.workers ?? [],
         });
+        rememberContinuationEvent(recordedEvent);
         yield recordedEvent;
       }
       if (
@@ -203,6 +289,7 @@ export async function* runAgentCoreController(
         const compactRun = await applyAgentCoreRunBudgetWithHookRecording({
           messages: result.messages,
           model,
+          provider,
           session,
           budget: createAgentCoreReactiveCompactBudget(options.budget),
           hooks,
@@ -219,7 +306,17 @@ export async function* runAgentCoreController(
         if (budgetState.compacted) {
           persistedMessageCount = 0;
         }
-        systemPrompt = renderAgentCoreRunSystemPrompt({
+        systemPromptBlocks = appendAgentCoreHostPromptBlocks(
+          renderAgentCoreRunSystemPromptBlocks({
+            promptContext: context.promptContext,
+            promptProfile: context.promptProfile,
+            budgetState,
+            budgetOptions: options.budget,
+          }),
+          options.additionalSystemPromptBlocks,
+        );
+        systemPrompt = joinAgentCorePromptBlocks(systemPromptBlocks);
+        turnContext = renderAgentCoreRunTurnContext({
           promptContext: context.promptContext,
           promptProfile: context.promptProfile,
           budgetState,
@@ -228,8 +325,15 @@ export async function* runAgentCoreController(
         await recordAgentCoreSystemContextSnapshot({
           session,
           prompt: systemPrompt,
+          promptBlocks: systemPromptBlocks,
           promptContext: context.promptContext,
           reason: "compact",
+        });
+        yield await recordContinuation({
+          continuation: {
+            reason: "reactive_compact_retry",
+          },
+          messageCount: messages.length,
         });
         continue;
       }
@@ -261,6 +365,14 @@ export async function* runAgentCoreController(
         messages: result.messages,
         startIndex: persistedMessageCount,
       });
+      const pendingInteraction =
+        result.status === "waiting-for-permission" || result.status === "waiting-for-elicitation"
+          ? await recordAgentCorePendingInteraction({
+              session,
+              result,
+              messageCount: result.messages.length,
+            })
+          : undefined;
       if (
         result.status === "waiting-for-elicitation" &&
         options.onElicitationRequest !== undefined
@@ -274,31 +386,105 @@ export async function* runAgentCoreController(
           timeoutMs: options.elicitationTimeoutMs,
           signal: options.signal,
           workers: options.workers ?? [],
+          interactionId: pendingInteraction!.id,
+        });
+        persistedMessageCount = await recordAgentCoreRunMessagesFrom({
+          session,
+          messages,
+          startIndex: persistedMessageCount,
+        });
+        await syncThreadState();
+        yield await recordContinuation({
+          continuation: {
+            reason: "elicitation_resume",
+          },
+          messageCount: messages.length,
         });
         continue;
       }
       if (result.status !== "waiting-for-permission" || options.onPermissionRequest === undefined) {
         await syncThreadState(result);
-        return {
+        finalResult = {
           ...result,
           session: session.handle,
         };
+        return finalResult;
       }
-      await syncThreadState(result);
-      messages = yield* resumeAgentCoreRunPermission({
-        session,
-        result,
-        cwd,
-        tools: context.tools,
-        signal: options.signal,
-        requestWorkerPermission,
-        onPermissionRequest: options.onPermissionRequest,
-        workers: options.workers ?? [],
-      });
+      let permissionResult: Extract<
+        AgentCoreQueryLoopResult,
+        { status: "waiting-for-permission" }
+      > = result;
+      let permissionInteraction = pendingInteraction!;
+      while (true) {
+        await syncThreadState(permissionResult);
+        const resumeResult = yield* resumeAgentCoreRunPermission({
+          session,
+          result: permissionResult,
+          cwd,
+          tools: context.tools,
+          signal: options.signal,
+          requestWorkerPermission,
+          storeToolResultBlob,
+          onPermissionRequest: options.onPermissionRequest,
+          workers: options.workers ?? [],
+          interactionId: permissionInteraction.id,
+        });
+        persistedMessageCount = await recordAgentCoreRunMessagesFrom({
+          session,
+          messages: resumeResult.messages,
+          startIndex: persistedMessageCount,
+        });
+        if (resumeResult.status === "resumed") {
+          messages = resumeResult.messages;
+          await syncThreadState();
+          yield await recordContinuation({
+            continuation: {
+              reason: "permission_resume",
+            },
+            messageCount: messages.length,
+          });
+          break;
+        }
+        if (
+          resumeResult.status === "waiting-for-permission" &&
+          options.onPermissionRequest !== undefined
+        ) {
+          permissionResult = resumeResult;
+          permissionInteraction = await recordAgentCorePendingInteraction({
+            session,
+            result: permissionResult,
+            messageCount: resumeResult.messages.length,
+          });
+          yield await recordContinuation({
+            continuation: {
+              reason: "permission_followup",
+            },
+            messageCount: resumeResult.messages.length,
+          });
+          continue;
+        }
+        await syncThreadState(resumeResult);
+        finalResult = {
+          ...resumeResult,
+          session: session.handle,
+        };
+        return finalResult;
+      }
     }
+  } catch (error) {
+    finalError = error;
+    throw error;
   } finally {
     try {
-      await closeAgentCoreRunMcpClients(mcpClientResolution.ownedClients);
+      try {
+        await finishAgentCoreLangfuseRunTrace({
+          trace: langfuseTrace,
+          result: finalResult,
+          error: finalError,
+        });
+      } finally {
+        await closeAgentCoreRunMcpClients(mcpClientResolution.ownedClients);
+      }
     } finally {
       if (session.ownsStateStore) {
         session.stateStore.close();

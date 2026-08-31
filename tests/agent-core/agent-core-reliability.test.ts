@@ -10,10 +10,19 @@ import {
 import { readAgentCoreJsonlWindow } from "../../src/agent-core/session/agent-core-jsonl-window-reader";
 import { readLatestAgentCorePlanJournal } from "../../src/agent-core/tools/agent-core-plan-journal";
 import { runAgentCoreQueryLoop } from "../../src/agent-core/query-loop/agent-core-query-loop";
+import {
+  AGENT_CORE_PERSISTED_TOOL_OUTPUT_TAG,
+  AGENT_CORE_TOOL_RESULTS_PER_TURN_MAX_CHARS,
+} from "../../src/agent-core/query-loop/agent-core-tool-result-turn-budget";
+import {
+  readAgentCoreToolResultBlob,
+  writeAgentCoreToolResultBlob,
+} from "../../src/agent-core/tools/agent-core-tool-result-blob-store";
 import { readLatestAgentCoreShellTaskJournal } from "../../src/agent-core/tools/shell-task-journal";
 import { readAgentCoreShellCwdState } from "../../src/agent-core/tools/shell-cwd-state";
 import { evaluateAgentCorePathPermission } from "../../src/agent-core/permissions/workspace-path-policy";
 import { restoreAgentCoreCheckpointRecord } from "../../src/agent-core/checkpoint/agent-core-checkpoint-restore";
+import { createAgentCoreToolCall } from "../../src/agent-core/model/agent-core-model-wire";
 import type { AgentCoreSessionEntry } from "../../src/agent-core/session/agent-core-session-types";
 import type { AgentCoreToolDefinition } from "../../src/agent-core/tools/agent-core-tool-types";
 import type { AgentCoreCheckpointRecord } from "../../src/agent-core/checkpoint/agent-core-checkpoint-store";
@@ -286,5 +295,535 @@ describe("agent core reliability guards", () => {
     expect(result.status).toBe("error");
     expect(toolWasAborted).toBe(true);
     expect(events.some((event) => event.type === "error")).toBe(true);
+  });
+
+  it("caps aggregate tool result content within one assistant turn", async () => {
+    let streamCount = 0;
+    const storedBlobs: Array<{
+      toolCallId: string;
+      content: string;
+      originalChars: number;
+    }> = [];
+    const outputByName = new Map([
+      ["first", "a".repeat(150_000)],
+      ["second", "b".repeat(90_000)],
+      ["third", "c".repeat(1_000)],
+    ]);
+    const tool: AgentCoreToolDefinition = {
+      name: "big_read",
+      description: "Return large output.",
+      run: async (input) => ({
+        content: outputByName.get((input as { name: string }).name) ?? "",
+      }),
+    };
+
+    const loop = runAgentCoreQueryLoop({
+      cwd: "/tmp/project",
+      messages: [
+        {
+          role: "user",
+          content: "read lots",
+        },
+      ],
+      tools: [tool],
+      model: {
+        stream: async function* () {
+          streamCount += 1;
+          if (streamCount === 1) {
+            for (const name of ["first", "second", "third"]) {
+              yield {
+                type: "tool-call",
+                call: {
+                  id: `call_${name}`,
+                  name: "big_read",
+                  input: {
+                    name,
+                  },
+                },
+              };
+            }
+            yield {
+              type: "message-end",
+            };
+            return;
+          }
+          yield {
+            type: "text-delta",
+            content: "done",
+          };
+          yield {
+            type: "message-end",
+          };
+        },
+      },
+      maxTurns: 3,
+      storeToolResultBlob: async ({ call, content, originalChars }) => {
+        storedBlobs.push({
+          toolCallId: call.id,
+          content,
+          originalChars,
+        });
+        return {
+          outputBlobPath: `blob/${call.id}.json`,
+          outputBlobBytes: Buffer.byteLength(content, "utf8"),
+        };
+      },
+    });
+
+    const result = await (async () => {
+      while (true) {
+        const item = await loop.next();
+        if (item.done === true) {
+          return item.value;
+        }
+      }
+    })();
+
+    expect(result.status).toBe("completed");
+    const toolMessages = result.messages.filter((message) => message.role === "tool");
+    expect(toolMessages).toHaveLength(3);
+    expect(toolMessages[0]?.content).toContain(`<${AGENT_CORE_PERSISTED_TOOL_OUTPUT_TAG}>`);
+    expect(toolMessages[0]?.content).toContain("toolCallId: call_first");
+    expect(toolMessages[0]?.content).toContain("outputBlobPath: blob/call_first.json");
+    expect(toolMessages[0]?.content).toContain("keptChars: 80000");
+    expect(toolMessages[1]?.content).toContain(`<${AGENT_CORE_PERSISTED_TOOL_OUTPUT_TAG}>`);
+    expect(toolMessages[1]?.content).toContain("toolCallId: call_second");
+    expect(toolMessages[1]?.content).toContain("outputBlobPath: blob/call_second.json");
+    expect(toolMessages[1]?.content).toContain("keptChars: 0");
+    expect(toolMessages[1]?.content).toContain("(no preview retained in this message)");
+    expect(toolMessages[2]?.content).toContain("keptChars: 0");
+    expect(toolMessages[2]?.content).toContain("outputBlobPath: blob/call_third.json");
+    expect(toolMessages[2]?.content).toContain("(no preview retained in this message)");
+    expect(toolMessages[0]).toMatchObject({
+      outputTruncated: true,
+      outputOriginalChars: 150_000,
+      outputBlobPath: "blob/call_first.json",
+    });
+    expect(toolMessages[1]).toMatchObject({
+      outputTruncated: true,
+      outputOriginalChars: 90_000,
+      outputBlobPath: "blob/call_second.json",
+    });
+    expect(toolMessages[2]).toMatchObject({
+      outputTruncated: true,
+      outputOriginalChars: 1_000,
+      outputBlobPath: "blob/call_third.json",
+    });
+    expect(storedBlobs).toEqual([
+      {
+        toolCallId: "call_first",
+        content: "a".repeat(150_000),
+        originalChars: 150_000,
+      },
+      {
+        toolCallId: "call_second",
+        content: "b".repeat(90_000),
+        originalChars: 90_000,
+      },
+      {
+        toolCallId: "call_third",
+        content: "c".repeat(1_000),
+        originalChars: 1_000,
+      },
+    ]);
+    expect(toolMessages.reduce((sum, message) => sum + message.content.length, 0)).toBeLessThan(
+      AGENT_CORE_TOOL_RESULTS_PER_TURN_MAX_CHARS + 1_000,
+    );
+  });
+
+  it("persists full output before applying a single tool max result threshold", async () => {
+    let streamCount = 0;
+    const storedBlobs: Array<{
+      content: string;
+      originalChars: number;
+    }> = [];
+    const fullOutput = "0123456789".repeat(20);
+    const tool: AgentCoreToolDefinition = {
+      name: "read_big",
+      description: "Return one large result.",
+      maxResultSizeChars: 12,
+      run: async () => ({
+        content: fullOutput,
+      }),
+    };
+
+    const loop = runAgentCoreQueryLoop({
+      cwd: "/tmp/project",
+      messages: [
+        {
+          role: "user",
+          content: "read big",
+        },
+      ],
+      tools: [tool],
+      model: {
+        stream: async function* () {
+          streamCount += 1;
+          if (streamCount === 1) {
+            yield {
+              type: "tool-call",
+              call: {
+                id: "call_big",
+                name: "read_big",
+                input: {},
+              },
+            };
+            yield {
+              type: "message-end",
+            };
+            return;
+          }
+          yield {
+            type: "text-delta",
+            content: "done",
+          };
+          yield {
+            type: "message-end",
+          };
+        },
+      },
+      maxTurns: 3,
+      storeToolResultBlob: async ({ content, originalChars }) => {
+        storedBlobs.push({
+          content,
+          originalChars,
+        });
+        return {
+          outputBlobPath: "threads/session/tool-results/call_big.json",
+          outputBlobBytes: Buffer.byteLength(content, "utf8"),
+        };
+      },
+    });
+
+    const result = await (async () => {
+      while (true) {
+        const item = await loop.next();
+        if (item.done === true) {
+          return item.value;
+        }
+      }
+    })();
+
+    const toolMessage = result.messages.find((message) => message.role === "tool");
+    expect(result.status).toBe("completed");
+    expect(storedBlobs).toEqual([
+      {
+        content: fullOutput,
+        originalChars: fullOutput.length,
+      },
+    ]);
+    expect(toolMessage).toMatchObject({
+      outputTruncated: true,
+      outputOriginalChars: fullOutput.length,
+      outputMaxChars: 12,
+      outputBlobPath: "threads/session/tool-results/call_big.json",
+    });
+    expect(toolMessage?.content).toContain(`<${AGENT_CORE_PERSISTED_TOOL_OUTPUT_TAG}>`);
+    expect(toolMessage?.content).toContain("toolMaxResultChars: 12");
+    expect(toolMessage?.content).toContain("Preview:\n012345678901");
+    expect(toolMessage?.content).toContain(
+      "outputBlobPath: threads/session/tool-results/call_big.json",
+    );
+  });
+
+  it("stores full truncated tool result blobs under the session runtime path", async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), "mllo-tool-blob-"));
+    const content = "full output\n".repeat(1_000);
+    const stored = await writeAgentCoreToolResultBlob({
+      projectDir,
+      sessionId: "session/with unsafe chars",
+      cwd: "/tmp/project",
+      toolCallId: "call_read",
+      toolName: "read_file",
+      content,
+      originalChars: content.length + 10,
+    });
+
+    const blob = await readAgentCoreToolResultBlob({
+      projectDir,
+      relativePath: stored.relativePath,
+    });
+
+    expect(stored.relativePath).toContain("threads/session-with-unsafe-chars/tool-results/");
+    expect(stored.byteLength).toBeGreaterThan(content.length);
+    expect(blob).toMatchObject({
+      version: 1,
+      sessionId: "session/with unsafe chars",
+      cwd: "/tmp/project",
+      toolCallId: "call_read",
+      toolName: "read_file",
+      content,
+      originalChars: content.length + 10,
+    });
+    await expect(
+      readAgentCoreToolResultBlob({
+        projectDir,
+        relativePath: "../escape.json",
+      }),
+    ).rejects.toThrow("Tool result blob path escapes mllo project storage.");
+  });
+
+  it("does not pre-execute repaired streaming tool calls before the model turn closes", async () => {
+    let modelTurnClosed = false;
+    let toolRanBeforeModelTurnClosed = false;
+    let streamCount = 0;
+    const tool: AgentCoreToolDefinition = {
+      name: "read_snapshot",
+      description: "Read a stable snapshot.",
+      isConcurrencySafe: () => true,
+      run: async () => {
+        toolRanBeforeModelTurnClosed = !modelTurnClosed;
+        return {
+          content: "snapshot",
+        };
+      },
+    };
+
+    const loop = runAgentCoreQueryLoop({
+      cwd: "/tmp/project",
+      messages: [
+        {
+          role: "user",
+          content: "read",
+        },
+      ],
+      tools: [tool],
+      model: {
+        stream: async function* () {
+          streamCount += 1;
+          if (streamCount === 1) {
+            yield {
+              type: "tool-call",
+              call: {
+                id: "tool-1",
+                name: "read_snapshot",
+                input: {
+                  path: "file.txt",
+                },
+                inputParseStatus: {
+                  status: "repaired-truncated-json",
+                  rawPreview: '{"path":"file.txt"',
+                },
+              },
+            };
+            await Promise.resolve();
+            modelTurnClosed = true;
+            yield {
+              type: "message-end",
+            };
+            return;
+          }
+          yield {
+            type: "text-delta",
+            content: "done",
+          };
+          yield {
+            type: "message-end",
+          };
+        },
+      },
+      maxTurns: 3,
+    });
+
+    let result;
+    while (true) {
+      const item = await loop.next();
+      if (item.done === true) {
+        result = item.value;
+        break;
+      }
+    }
+
+    expect(result.status).toBe("completed");
+    expect(toolRanBeforeModelTurnClosed).toBe(false);
+  });
+
+  it("normalizes duplicate streaming tool call ids before recording tool results", async () => {
+    const toolInputs: unknown[] = [];
+    let streamCount = 0;
+    const tool: AgentCoreToolDefinition = {
+      name: "echo",
+      description: "Echo the input.",
+      isConcurrencySafe: () => true,
+      run: async (input) => {
+        toolInputs.push(input);
+        return {
+          content: JSON.stringify(input),
+        };
+      },
+    };
+
+    const events = [];
+    const loop = runAgentCoreQueryLoop({
+      cwd: "/tmp/project",
+      messages: [
+        {
+          role: "user",
+          content: "run duplicate ids",
+        },
+      ],
+      tools: [tool],
+      model: {
+        stream: async function* () {
+          streamCount += 1;
+          if (streamCount === 1) {
+            yield {
+              type: "tool-call",
+              call: {
+                id: "call_same",
+                name: "echo",
+                input: {
+                  value: 1,
+                },
+              },
+            };
+            yield {
+              type: "tool-call",
+              call: {
+                id: "call_same",
+                name: "echo",
+                input: {
+                  value: 2,
+                },
+              },
+            };
+            yield {
+              type: "message-end",
+            };
+            return;
+          }
+          yield {
+            type: "text-delta",
+            content: "done",
+          };
+          yield {
+            type: "message-end",
+          };
+        },
+      },
+      maxTurns: 3,
+    });
+
+    let result;
+    while (true) {
+      const item = await loop.next();
+      if (item.done === true) {
+        result = item.value;
+        break;
+      }
+      events.push(item.value);
+    }
+
+    const assistantWithTools = result.messages.find(
+      (message) => message.role === "assistant" && (message.toolCalls?.length ?? 0) > 0,
+    );
+    const toolMessages = result.messages.filter((message) => message.role === "tool");
+
+    expect(result.status).toBe("completed");
+    expect(toolInputs).toEqual([
+      {
+        value: 1,
+      },
+      {
+        value: 2,
+      },
+    ]);
+    expect(assistantWithTools?.toolCalls?.map((call) => call.id)).toEqual([
+      "call_same",
+      "call_same_2",
+    ]);
+    expect(assistantWithTools?.toolCalls?.[1]?.idRepairStatus).toEqual({
+      status: "duplicate-id-renamed",
+      originalId: "call_same",
+      occurrence: 2,
+    });
+    expect(toolMessages.map((message) => message.toolCallId)).toEqual(["call_same", "call_same_2"]);
+    expect(
+      events.filter((event) => event.type === "tool-call").map((event) => event.call.id),
+    ).toEqual(["call_same", "call_same_2"]);
+  });
+
+  it("runs whitelisted repaired tool input aliases through the query loop", async () => {
+    let receivedInput: unknown;
+    let streamCount = 0;
+    const tool: AgentCoreToolDefinition = {
+      name: "read_file",
+      description: "Read a file.",
+      isConcurrencySafe: () => true,
+      run: async (input) => {
+        receivedInput = input;
+        return {
+          content: "file content",
+        };
+      },
+    };
+
+    const loop = runAgentCoreQueryLoop({
+      cwd: "/tmp/project",
+      messages: [
+        {
+          role: "user",
+          content: "read file",
+        },
+      ],
+      tools: [tool],
+      model: {
+        stream: async function* () {
+          streamCount += 1;
+          if (streamCount === 1) {
+            yield {
+              type: "tool-call",
+              call: createAgentCoreToolCall({
+                id: "call_alias",
+                index: 0,
+                name: "read_file",
+                arguments: {
+                  file_path: "README.md",
+                },
+              }),
+            };
+            yield {
+              type: "message-end",
+            };
+            return;
+          }
+          yield {
+            type: "text-delta",
+            content: "done",
+          };
+          yield {
+            type: "message-end",
+          };
+        },
+      },
+      maxTurns: 3,
+    });
+
+    let result;
+    while (true) {
+      const item = await loop.next();
+      if (item.done === true) {
+        result = item.value;
+        break;
+      }
+    }
+
+    const assistantWithTools = result.messages.find(
+      (message) => message.role === "assistant" && (message.toolCalls?.length ?? 0) > 0,
+    );
+
+    expect(result.status).toBe("completed");
+    expect(receivedInput).toEqual({
+      path: "README.md",
+    });
+    expect(assistantWithTools?.toolCalls?.[0]?.inputRepairStatus).toEqual({
+      status: "parameter-alias-renamed",
+      repairs: [
+        {
+          from: "file_path",
+          to: "path",
+        },
+      ],
+    });
   });
 });

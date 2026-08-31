@@ -2,6 +2,7 @@ import type { MlloCliIo } from "./mllo-cli-io";
 import { writeCliLine } from "./mllo-cli-io";
 import type { MlloCliParsedArgs } from "./mllo-cli-types";
 import { MlloCliEventRenderer } from "./mllo-cli-event-renderer";
+import { loadMlloCliReadlineHistory } from "./mllo-cli-history";
 import { createMlloCliInteraction, createMlloCliReadline } from "./mllo-cli-interaction";
 import { consumeMlloCliAgentRun, createMlloCliRunOptions } from "./mllo-cli-run-options";
 import { exitCodeFromMlloRunResult } from "./mllo-cli-exit-code";
@@ -19,6 +20,7 @@ function nextChatTurnArgs(
     ...parsed,
     command: "chat",
     promptParts: [],
+    continueLatest: sessionId === undefined ? parsed.continueLatest : false,
     ...(sessionId === undefined
       ? {}
       : {
@@ -36,9 +38,13 @@ export async function runMlloCliChat(args: {
   if (args.io.stdin.isTTY !== true) {
     throw new Error("mllo chat requires an interactive TTY.");
   }
+  const history = await loadMlloCliReadlineHistory({
+    parsed: args.parsed,
+  });
   const readline = createMlloCliReadline({
     stdin: args.io.stdin,
     stderr: args.io.stderr,
+    history,
   });
   const interaction = createMlloCliInteraction({
     readline,
@@ -64,7 +70,7 @@ export async function runMlloCliChat(args: {
         stderr: args.io.stderr,
       });
       const result = await consumeMlloCliAgentRun({
-        options: createMlloCliRunOptions({
+        options: await createMlloCliRunOptions({
           parsed: nextChatTurnArgs(args.parsed, sessionId),
           input,
           handlers: interaction.handlers,

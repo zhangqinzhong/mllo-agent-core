@@ -11,9 +11,15 @@ permissions:
 
 jobs:
   verify:
-    name: Verify
+    name: Verify (Node.js ${{ matrix.node-version }})
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version:
+          - 22.x
+          - 24.x
 
     steps:
       - name: Checkout
@@ -22,7 +28,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ matrix.node-version }}
           cache: npm
 
       - name: Install dependencies
@@ -37,11 +43,15 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Audit production dependencies
+        if: matrix.node-version == '24.x'
+        run: npm audit --omit=dev --audit-level=high
+
       - name: Build
         run: npm run clean && npm run build
 
       - name: Package check
         run: npm run pack:check
 
-      - name: CLI smoke test
-        run: npm run smoke:cli
+      - name: Installed package smoke test
+        run: node scripts/smoke-packed-package.mjs
