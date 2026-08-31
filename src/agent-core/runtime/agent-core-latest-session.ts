@@ -1,6 +1,10 @@
 import { access } from "node:fs/promises";
 import { resolve } from "node:path";
 import SyncDatabase from "../../sqlite/sync-database";
+import {
+  MlloStateSchemaVersionError,
+  assertMlloStateSchemaVersionSupported,
+} from "../runtime-state/mllo-state-schema";
 import type { MlloThreadRow } from "../runtime-state/mllo-thread-records";
 import { toMlloThreadRecord } from "../runtime-state/mllo-thread-records";
 import { readAgentCoreSessionIndex } from "../session/agent-core-session-index";
@@ -62,6 +66,7 @@ async function readLatestStateSession(
     timeout: 1000,
   });
   try {
+    assertMlloStateSchemaVersionSupported(db);
     if (!hasSqliteTable(db, "threads")) {
       return undefined;
     }
@@ -89,7 +94,10 @@ async function readLatestStateSession(
       }
     }
     return undefined;
-  } catch {
+  } catch (error) {
+    if (error instanceof MlloStateSchemaVersionError) {
+      throw error;
+    }
     return undefined;
   } finally {
     db.close();

@@ -4,6 +4,20 @@ export type {
   AgentCoreRunControllerResult,
 } from "../runtime/agent-core-run-controller-types";
 export { redactAgentCorePermissionCallInput } from "../runtime/agent-core-permission-input-redaction";
+export {
+  getAgentCoreInteraction,
+  listPendingAgentCoreInteractions,
+  submitAgentCoreInteractionResolution,
+} from "../runtime/agent-core-interactions";
+export { AGENT_CORE_INTERACTION_SCHEMA_VERSION } from "../interactions/agent-core-interaction-types";
+export type {
+  AgentCoreInteractionContext,
+  AgentCoreInteractionKind,
+  AgentCoreInteractionRequest,
+  AgentCoreInteractionResolution,
+  AgentCoreInteractionResolutionResult,
+  AgentCoreInteractionResolutionSource,
+} from "../interactions/agent-core-interaction-types";
 
 export {
   findAgentCoreTranscriptPath,
@@ -24,11 +38,24 @@ export {
 } from "../runtime-home/mllo-home-paths";
 
 export { MlloStateStore } from "../runtime-state/mllo-state-store";
+export { reindexMlloState } from "../runtime-state/mllo-state-reindex";
+export type {
+  MlloStateReindexOptions,
+  MlloStateReindexResult,
+} from "../runtime-state/mllo-state-reindex";
+export {
+  MLLO_STATE_SCHEMA_VERSION,
+  MlloStateSchemaVersionError,
+} from "../runtime-state/mllo-state-schema";
 export { updateMlloThreadMetadata } from "../runtime-state/mllo-thread-metadata-update";
 export type { MlloTaskRecord } from "../runtime-state/mllo-task-records";
 export type { MlloTeamMemberRecord } from "../runtime-state/mllo-team-records";
 export type { MlloThreadRecord } from "../runtime-state/mllo-thread-records";
 export type { MlloWorkerToolEventRecord } from "../runtime-state/mllo-worker-tool-event-records";
+export type {
+  MlloInteractionRecord,
+  MlloInteractionStatus,
+} from "../runtime-state/mllo-interaction-records";
 
 export { AgentCoreCheckpointStore } from "../checkpoint/agent-core-checkpoint-store";
 export type { AgentCoreCheckpointRecord } from "../checkpoint/agent-core-checkpoint-store";

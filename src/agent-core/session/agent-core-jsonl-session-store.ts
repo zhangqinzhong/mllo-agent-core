@@ -38,6 +38,10 @@ type AgentCoreTimelineEventSessionEntry = Extract<
   { kind: "timeline-event" }
 >;
 type AgentCoreHookEventSessionEntry = Extract<AgentCoreSessionEntry, { kind: "hook-event" }>;
+type AgentCoreInteractionRequestSessionEntry = Extract<
+  AgentCoreSessionEntry,
+  { kind: "interaction-request-event" }
+>;
 type AgentCoreToolPermissionSessionEntry = Extract<
   AgentCoreSessionEntry,
   { kind: "permission-event"; source?: "tool" }
@@ -202,6 +206,27 @@ export class AgentCoreJsonlSessionStore {
     });
   }
 
+  // 创建 durable interaction request；它必须在调用宿主 callback 前写入。
+  createInteractionRequestEventEntry(args: {
+    sessionId: string;
+    cwd: string;
+    interactionId: string;
+    requestKey: string;
+    messageCount: number;
+    request: AgentCoreInteractionRequestSessionEntry["request"];
+  }): AgentCoreInteractionRequestSessionEntry {
+    return withAgentCoreSessionEntryEnvelope({
+      kind: "interaction-request-event",
+      version: 1,
+      sessionId: args.sessionId,
+      cwd: args.cwd,
+      interactionId: args.interactionId,
+      requestKey: args.requestKey,
+      messageCount: args.messageCount,
+      request: args.request,
+    });
+  }
+
   // 创建一条 permission event entry。用户审批是审计事实，不能只从后续 tool result 推断。
   createPermissionEventEntry(args: {
     sessionId: string;
@@ -209,6 +234,8 @@ export class AgentCoreJsonlSessionStore {
     call: AgentCoreToolPermissionSessionEntry["call"];
     request: AgentCoreToolPermissionSessionEntry["request"];
     response: AgentCoreToolPermissionSessionEntry["response"];
+    interactionId?: string;
+    resolutionSource?: AgentCoreToolPermissionSessionEntry["resolutionSource"];
   }): AgentCoreToolPermissionSessionEntry {
     return withAgentCoreSessionEntryEnvelope({
       kind: "permission-event",
@@ -218,6 +245,8 @@ export class AgentCoreJsonlSessionStore {
       call: args.call,
       request: args.request,
       response: args.response,
+      ...(args.interactionId === undefined ? {} : { interactionId: args.interactionId }),
+      ...(args.resolutionSource === undefined ? {} : { resolutionSource: args.resolutionSource }),
     });
   }
 
@@ -252,6 +281,8 @@ export class AgentCoreJsonlSessionStore {
     call: AgentCoreElicitationSessionEntry["call"];
     request: AgentCoreElicitationSessionEntry["request"];
     response: AgentCoreElicitationSessionEntry["response"];
+    interactionId?: string;
+    resolutionSource?: AgentCoreElicitationSessionEntry["resolutionSource"];
   }): AgentCoreElicitationSessionEntry {
     return withAgentCoreSessionEntryEnvelope({
       kind: "elicitation-event",
@@ -260,6 +291,8 @@ export class AgentCoreJsonlSessionStore {
       call: args.call,
       request: args.request,
       response: args.response,
+      ...(args.interactionId === undefined ? {} : { interactionId: args.interactionId }),
+      ...(args.resolutionSource === undefined ? {} : { resolutionSource: args.resolutionSource }),
     });
   }
 

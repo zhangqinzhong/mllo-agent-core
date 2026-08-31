@@ -4,6 +4,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import type { FetchLike, Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
+import { createAgentCoreMcpClientIdentity } from "./agent-core-mcp-client-identity";
 import type { AgentCoreToolAvailabilityPolicy } from "../tools/agent-core-tool-types";
 import type {
   AgentCoreMcpClient,
@@ -221,10 +222,7 @@ export class AgentCoreHttpMcpClient implements AgentCoreMcpClient {
 
   // 把 SDK transport 生命周期关在 adapter 内，给上层只暴露 core client。
   private async createConnection(): Promise<Client> {
-    const client = new Client({
-      name: "mllo-agent-core",
-      version: "0.1.0",
-    });
+    const client = new Client(createAgentCoreMcpClientIdentity());
     const transport = createTransport({
       url: this.url,
       headers: this.headers,

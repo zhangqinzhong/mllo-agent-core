@@ -27,6 +27,38 @@ host application
 
 宿主应用可以决定界面、窗口、IPC、配置入口和权限弹窗，但不能重新定义 agent core 的事实格式。
 
+## Compatibility Handshake
+
+宿主不能用 npm 包版本推断运行协议。Core 从根入口导出协议版本和一个无 I/O 的能力快照：
+
+```ts
+import {
+  AGENT_CORE_QUERY_EVENT_SCHEMA_VERSION,
+  AGENT_CORE_INTERACTION_SCHEMA_VERSION,
+  AGENT_CORE_RUNTIME_CONTRACT_VERSION,
+  MLLO_STATE_SCHEMA_VERSION,
+  getAgentCoreRuntimeCapabilities,
+} from '@mllo/agent-core'
+
+const capabilities = getAgentCoreRuntimeCapabilities()
+```
+
+当前公开版本为：
+
+| 边界 | 版本 | 含义 |
+| --- | ---: | --- |
+| Runtime contract | `1` | controller、权限、会话和宿主交互的整体语义 |
+| Query event schema | `1` | `AgentCoreQueryEvent` timeline 协议 |
+| Interaction schema | `1` | permission / elicitation request 与 resolution 协议 |
+| State schema | `9` | 当前 Core 能打开和写入的最高 SQLite `user_version` |
+
+版本规则：
+
+- 向后兼容地增加可忽略事件或可选字段，不提升 query event schema；删除、改名或改变已有字段语义时必须提升。
+- 任一稳定边界发生不兼容语义变化时，必须提升 runtime contract，并提供宿主迁移说明。
+- `state.sqlite` 表结构变化必须提升 state schema，并保留从旧版本向前迁移的测试 fixture。
+- 能力快照必须在打开 session 或 `state.sqlite` 之前可读取，宿主应按自己支持的版本范围做启动门禁。
+
 ## Stable Contracts
 
 以下内容变更时必须视为协议变更，并配套迁移或兼容层。
@@ -74,6 +106,7 @@ JSONL transcript 是会话事实来源。
 稳定要求：
 
 - 表结构变更必须走 schema version。
+- 数据库 `user_version` 高于 `MLLO_STATE_SCHEMA_VERSION` 时必须在建表、迁移或修改 journal 设置前抛出 `MlloStateSchemaVersionError`；宿主应升级 Core，不能用旧 Core 写入未来格式。
 - GUI 只能把它当索引；损坏时应能从 JSONL reindex。
 - thread、task、team、worker tool event 的语义要和 transcript entry 对齐。
 
@@ -126,6 +159,22 @@ JSONL transcript 是会话事实来源。
 - workspace roots 是文件工具的硬边界。
 - shell 风险解释必须能被 UI 原样展示。
 - 保存规则只能保存明确可解释的规则，不能保存含混输入。
+
+### 5.1 Durable Interactions
+
+permission 和 elicitation 使用统一 interaction 生命周期。Core 在调用宿主 callback 前追加
+`interaction-request-event`，再把 pending 当前态投影到 SQLite `interactions` 表；带
+`interactionId` 的 `permission-event` / `elicitation-event` 是 resolution 事实。
+
+稳定要求：
+
+- JSONL 始终是事实源，SQLite 只用于 `getInteraction()`、`listPendingInteractions()` 等快速查询。
+- `listPendingAgentCoreInteractions()` 可在进程重启后重新列出尚未决议的请求。
+- `submitAgentCoreInteractionResolution()` 对相同 resolution 返回 `already-resolved`；不同二次决议返回 `conflict`；kind 不匹配返回 `invalid-resolution`；未知 id 返回 `not-found`。
+- callback 仍可只接收原来的第一个参数；Core 会把 `{ interactionId }` 作为第二参数传入，供支持 durable UI 的宿主关联请求。
+- interaction resolution 只表示决定已收到，不表示工具已经执行。重启后不得仅凭已持久化的 `allow` 自动重放有副作用的工具；工具实现、受保护输入或执行状态缺失时，应由宿主重新发起运行。
+- permission request 中的 secret-like shell 环境变量在进入 JSONL/SQLite 前必须脱敏。
+- JSONL 与 SQLite 之间没有跨文件事务；同一 session 必须由单一宿主 writer 提交 resolution，崩溃后通过 reindex 修复 SQLite 投影。
 
 ### 6. Workers
 

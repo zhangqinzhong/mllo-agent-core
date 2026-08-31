@@ -1,0 +1,67 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build GitHub release artifact
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify tag and package versions
+        run: node scripts/verify-release-version.mjs "$GITHUB_REF_NAME"
+
+      - name: Verify source and package
+        run: npm run verify
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Smoke-test installed tarball
+        run: node scripts/smoke-packed-package.mjs
+
+      - name: Build release artifact
+        id: package
+        shell: bash
+        run: |
+          mkdir -p release-artifacts
+          filename="$(npm pack --ignore-scripts --pack-destination release-artifacts)"
+          sha256sum "release-artifacts/$filename" > "release-artifacts/$filename.sha256"
+          echo "filename=$filename" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          artifact="release-artifacts/${{ steps.package.outputs.filename }}"
+          checksum="$artifact.sha256"
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "$artifact" "$checksum" --clobber
+          else
+            gh release create "$RELEASE_TAG" "$artifact" "$checksum" \
+              --verify-tag \
+              --generate-notes \
+              --title "@mllo/agent-core $RELEASE_TAG"
+          fi

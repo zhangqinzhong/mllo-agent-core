@@ -29,6 +29,7 @@ import type { AgentCoreLangfuseTracingOptions } from "../observability/agent-cor
 import type { AgentCoreToolDefinition } from "../tools/agent-core-tool-types";
 import type { AgentCoreToolExposureMode } from "../tools/agent-core-tool-exposure";
 import type { AgentCorePromptBlock } from "../query-loop/agent-core-prompt-block-types";
+import type { AgentCoreInteractionContext } from "../interactions/agent-core-interaction-types";
 
 export type AgentCoreRunControllerOptions = {
   cwd: string;
@@ -71,9 +72,11 @@ export type AgentCoreRunControllerOptions = {
   session: AgentCoreRunSessionOptions;
   onPermissionRequest?: (
     result: Extract<AgentCoreQueryLoopResult, { status: "waiting-for-permission" }>,
+    context: AgentCoreInteractionContext,
   ) => Promise<AgentCorePermissionResumeDecision>;
   onElicitationRequest?: (
     result: Extract<AgentCoreQueryLoopResult, { status: "waiting-for-elicitation" }>,
+    context: AgentCoreInteractionContext,
   ) => Promise<AgentCoreElicitationResumeDecision>;
   onWorkerPermissionRequest?: (
     request: AgentCoreWorkerPermissionRequest & {

@@ -1,4 +1,19 @@
 export { runAgentCoreController } from "./runtime/agent-core-run-controller";
+export {
+  getAgentCoreInteraction,
+  listPendingAgentCoreInteractions,
+  submitAgentCoreInteractionResolution,
+} from "./runtime/agent-core-interactions";
+export { AGENT_CORE_INTERACTION_SCHEMA_VERSION } from "./interactions/agent-core-interaction-types";
+export type {
+  AgentCoreInteractionContext,
+  AgentCoreInteractionKind,
+  AgentCoreInteractionRequest,
+  AgentCoreInteractionResolution,
+  AgentCoreInteractionResolutionResult,
+  AgentCoreInteractionResolutionSource,
+} from "./interactions/agent-core-interaction-types";
+export { MLLO_AGENT_CORE_VERSION } from "./agent-core-version";
 export { resolveLatestAgentCoreSession } from "./runtime/agent-core-latest-session";
 export type {
   AgentCoreLatestSession,
@@ -9,6 +24,26 @@ export type {
   AgentCoreRunControllerResult,
 } from "./runtime/agent-core-run-controller-types";
 export type { AgentCorePromptProfile } from "./context/agent-core-prompt-profile";
+export {
+  AGENT_CORE_QUERY_EVENT_SCHEMA_VERSION,
+  AGENT_CORE_RUNTIME_CONTRACT_VERSION,
+  getAgentCoreRuntimeCapabilities,
+} from "./runtime/agent-core-runtime-contract";
+export type { AgentCoreRuntimeCapabilities } from "./runtime/agent-core-runtime-contract";
+export {
+  MLLO_STATE_SCHEMA_VERSION,
+  MlloStateSchemaVersionError,
+} from "./runtime-state/mllo-state-schema";
+export { MlloStateStore } from "./runtime-state/mllo-state-store";
+export { reindexMlloState } from "./runtime-state/mllo-state-reindex";
+export type {
+  MlloStateReindexOptions,
+  MlloStateReindexResult,
+} from "./runtime-state/mllo-state-reindex";
+export type {
+  MlloInteractionRecord,
+  MlloInteractionStatus,
+} from "./runtime-state/mllo-interaction-records";
 
 export { runAgentCoreQueryLoop } from "./query-loop/agent-core-query-loop";
 export type {
@@ -164,6 +199,7 @@ export type {
   AgentCoreSessionHandle,
   AgentCoreSessionMetadata,
 } from "./session/agent-core-session-types";
+export { AgentCoreJsonlSessionStore } from "./session/agent-core-jsonl-session-store";
 export {
   appendAgentCoreInputHistoryEntry,
   listAgentCoreInputHistory,

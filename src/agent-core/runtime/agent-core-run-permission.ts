@@ -8,10 +8,10 @@ import type {
   AgentCoreQueryLoopResult,
 } from "../query-loop/agent-core-query-types";
 import type { AgentCoreWorker } from "../workers/agent-core-worker-types";
-import { recordAgentCorePermissionDecision } from "./agent-core-permission-audit";
 import { recordAgentCoreRunEvent } from "./agent-core-run-recording";
 import type { AgentCoreRunControllerOptions } from "./agent-core-run-controller-types";
 import type { AgentCorePreparedRunSession } from "./agent-core-run-session";
+import { submitAgentCoreInteractionResolution } from "./agent-core-interactions";
 
 export type AgentCoreRunPermissionArgs = {
   cwd: string;
@@ -23,18 +23,31 @@ export type AgentCoreRunPermissionArgs = {
   storeToolResultBlob?: AgentCoreQueryLoopArgs["storeToolResultBlob"];
   onPermissionRequest: NonNullable<AgentCoreRunControllerOptions["onPermissionRequest"]>;
   workers: readonly AgentCoreWorker[];
+  interactionId: string;
 };
 
 // 恢复 permission 暂停点。审批决定先写 JSONL 审计，再执行被暂停的工具。
 export async function* resumeAgentCoreRunPermission(
   args: AgentCoreRunPermissionArgs,
 ): AsyncGenerator<AgentCoreQueryEvent, AgentCorePermissionResumeResult> {
-  const decision = await args.onPermissionRequest(args.result);
-  await recordAgentCorePermissionDecision({
-    session: args.session,
-    result: args.result,
-    decision,
+  const decision = await args.onPermissionRequest(args.result, {
+    interactionId: args.interactionId,
   });
+  const resolution = await submitAgentCoreInteractionResolution({
+    stateStore: args.session.stateStore,
+    sessionStore: args.session.store,
+    interactionId: args.interactionId,
+    resolution: {
+      kind: "permission",
+      decision,
+    },
+    source: "callback",
+  });
+  if (resolution.status !== "resolved" && resolution.status !== "already-resolved") {
+    throw new Error(
+      `Permission interaction ${args.interactionId} resolution failed: ${resolution.status}.`,
+    );
+  }
   const resumeGenerator = resumeAgentCorePermissionDecision({
     waitingResult: args.result,
     cwd: args.cwd,

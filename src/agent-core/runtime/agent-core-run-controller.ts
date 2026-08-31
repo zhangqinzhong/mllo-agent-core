@@ -62,6 +62,7 @@ import {
   finishAgentCoreLangfuseRunTrace,
   type AgentCoreLangfuseRunTrace,
 } from "../observability/agent-core-langfuse-run-trace";
+import { recordAgentCorePendingInteraction } from "./agent-core-interactions";
 // 运行一次 Agent Core 对话。它串起 provider、context、tools、session 和 query loop。
 export async function* runAgentCoreController(
   options: AgentCoreRunControllerOptions,
@@ -364,6 +365,14 @@ export async function* runAgentCoreController(
         messages: result.messages,
         startIndex: persistedMessageCount,
       });
+      const pendingInteraction =
+        result.status === "waiting-for-permission" || result.status === "waiting-for-elicitation"
+          ? await recordAgentCorePendingInteraction({
+              session,
+              result,
+              messageCount: result.messages.length,
+            })
+          : undefined;
       if (
         result.status === "waiting-for-elicitation" &&
         options.onElicitationRequest !== undefined
@@ -377,7 +386,14 @@ export async function* runAgentCoreController(
           timeoutMs: options.elicitationTimeoutMs,
           signal: options.signal,
           workers: options.workers ?? [],
+          interactionId: pendingInteraction!.id,
         });
+        persistedMessageCount = await recordAgentCoreRunMessagesFrom({
+          session,
+          messages,
+          startIndex: persistedMessageCount,
+        });
+        await syncThreadState();
         yield await recordContinuation({
           continuation: {
             reason: "elicitation_resume",
@@ -398,6 +414,7 @@ export async function* runAgentCoreController(
         AgentCoreQueryLoopResult,
         { status: "waiting-for-permission" }
       > = result;
+      let permissionInteraction = pendingInteraction!;
       while (true) {
         await syncThreadState(permissionResult);
         const resumeResult = yield* resumeAgentCoreRunPermission({
@@ -410,6 +427,7 @@ export async function* runAgentCoreController(
           storeToolResultBlob,
           onPermissionRequest: options.onPermissionRequest,
           workers: options.workers ?? [],
+          interactionId: permissionInteraction.id,
         });
         persistedMessageCount = await recordAgentCoreRunMessagesFrom({
           session,
@@ -418,6 +436,7 @@ export async function* runAgentCoreController(
         });
         if (resumeResult.status === "resumed") {
           messages = resumeResult.messages;
+          await syncThreadState();
           yield await recordContinuation({
             continuation: {
               reason: "permission_resume",
@@ -431,6 +450,11 @@ export async function* runAgentCoreController(
           options.onPermissionRequest !== undefined
         ) {
           permissionResult = resumeResult;
+          permissionInteraction = await recordAgentCorePendingInteraction({
+            session,
+            result: permissionResult,
+            messageCount: resumeResult.messages.length,
+          });
           yield await recordContinuation({
             continuation: {
               reason: "permission_followup",

@@ -1,7 +1,11 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import SyncDatabase, { type SyncDatabaseHandle } from "../../sqlite/sync-database";
-import { createMlloStateSchema, getMlloStateSchemaVersion } from "./mllo-state-schema";
+import {
+  assertMlloStateSchemaVersionSupported,
+  createMlloStateSchema,
+  getMlloStateSchemaVersion,
+} from "./mllo-state-schema";
 import {
   toMlloTaskRecord,
   stringifyMlloTaskLinks,
@@ -36,6 +40,14 @@ import {
   type MlloThreadRecord,
   type MlloThreadRow,
 } from "./mllo-thread-records";
+import {
+  getMlloInteraction,
+  listMlloInteractionsForThread,
+  listPendingMlloInteractions,
+  upsertMlloInteraction,
+  type MlloInteractionRecord,
+  type MlloInteractionStatus,
+} from "./mllo-interaction-records";
 
 export type MlloStateStoreOptions = {
   dbPath: string | ":memory:";
@@ -53,11 +65,19 @@ export class MlloStateStore {
         recursive: true,
       });
     }
-    this.db = new SyncDatabase(dbPath);
-    this.db.pragma("journal_mode = WAL");
-    this.db.pragma("synchronous = NORMAL");
-    this.db.pragma("busy_timeout = 5000");
-    createMlloStateSchema(this.db);
+    const db = new SyncDatabase(dbPath);
+    try {
+      // 先拒绝未来 schema，再配置连接和迁移；旧 Core 不能改写新 Core 的数据库。
+      assertMlloStateSchemaVersionSupported(db);
+      db.pragma("busy_timeout = 5000");
+      db.pragma("journal_mode = WAL");
+      db.pragma("synchronous = NORMAL");
+      createMlloStateSchema(db);
+    } catch (error) {
+      db.close();
+      throw error;
+    }
+    this.db = db;
   }
 
   // 关闭 SQLite 连接，测试和应用退出时都应显式释放文件句柄。
@@ -73,6 +93,7 @@ export class MlloStateStore {
   // 清空派生索引表。JSONL transcript 仍然保留，reindex 会从事实日志重新生成这些行。
   clearDerivedState(): void {
     this.db.exec(`
+      DELETE FROM interactions;
       DELETE FROM worker_tool_events;
       DELETE FROM checkpoint_restore_files;
       DELETE FROM checkpoint_restores;
@@ -319,5 +340,37 @@ export class MlloStateStore {
   // 按 invocationId 配对 use/result，避免审计页用时间顺序猜测对应关系。
   listWorkerToolEventPairsForThread(threadId: string): MlloWorkerToolEventPair[] {
     return listMlloWorkerToolEventPairsForThread(this.db, threadId);
+  }
+
+  // interaction 是 JSONL request/resolution 事实的当前态投影，写入时不降级 resolved 行。
+  upsertInteraction(record: MlloInteractionRecord): MlloInteractionRecord {
+    upsertMlloInteraction(this.db, record);
+    return this.getInteraction(record.id) ?? record;
+  }
+
+  // 按稳定 interaction id 读取待处理或已处理请求。
+  getInteraction(interactionId: string): MlloInteractionRecord | undefined {
+    return getMlloInteraction(this.db, interactionId);
+  }
+
+  // 给桌面宿主列出需要展示的 permission / elicitation 请求。
+  listPendingInteractions(
+    options: { threadId?: string; limit?: number } = {},
+  ): MlloInteractionRecord[] {
+    return listPendingMlloInteractions(this.db, {
+      ...(options.threadId === undefined ? {} : { threadId: options.threadId }),
+      limit: options.limit ?? 100,
+    });
+  }
+
+  // 审计单个 thread 的 interaction 生命周期，可按状态筛选。
+  listInteractionsForThread(
+    threadId: string,
+    options: { status?: MlloInteractionStatus; limit?: number } = {},
+  ): MlloInteractionRecord[] {
+    return listMlloInteractionsForThread(this.db, threadId, {
+      ...(options.status === undefined ? {} : { status: options.status }),
+      limit: options.limit ?? 100,
+    });
   }
 }

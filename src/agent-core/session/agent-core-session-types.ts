@@ -15,6 +15,10 @@ import type {
   AgentCoreWorkerPermissionDecision,
   AgentCoreWorkerPermissionRequest,
 } from "../workers/agent-core-worker-types";
+import type {
+  AgentCoreInteractionRequest,
+  AgentCoreInteractionResolutionSource,
+} from "../interactions/agent-core-interaction-types";
 
 export type AgentCoreSessionEntryKind =
   | "session-metadata"
@@ -22,6 +26,7 @@ export type AgentCoreSessionEntryKind =
   | "message"
   | "timeline-event"
   | "hook-event"
+  | "interaction-request-event"
   | "permission-event"
   | "worker-tool-event"
   | "worker-tool-result-event"
@@ -154,6 +159,18 @@ export type AgentCoreSessionEntry =
       content?: string;
     }
   | {
+      kind: "interaction-request-event";
+      uuid: string;
+      timestamp: string;
+      sessionId: string;
+      cwd: string;
+      version: 1;
+      interactionId: string;
+      requestKey: string;
+      messageCount: number;
+      request: AgentCoreInteractionRequest;
+    }
+  | {
       kind: "permission-event";
       uuid: string;
       timestamp: string;
@@ -162,6 +179,8 @@ export type AgentCoreSessionEntry =
       source?: "tool";
       call: AgentCoreToolCall;
       request: AgentCorePermissionDecision;
+      interactionId?: string;
+      resolutionSource?: AgentCoreInteractionResolutionSource;
       response:
         | {
             status: "allow";
@@ -206,6 +225,8 @@ export type AgentCoreSessionEntry =
       cwd: string;
       call: AgentCoreToolCall;
       request: Extract<AgentCoreQueryLoopResult, { status: "waiting-for-elicitation" }>["request"];
+      interactionId?: string;
+      resolutionSource?: AgentCoreInteractionResolutionSource;
       response: AgentCoreElicitationResumeDecision;
     }
   | {
